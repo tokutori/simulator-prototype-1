@@ -1,0 +1,25 @@
+[workspace]
+members = [
+  "crates/fbw-control-core",
+  "crates/fbw-safety-core",
+  "crates/flight-dynamics-core",
+  "crates/qx18-fbw-config",
+  "crates/sim-cli",
+]
+resolver = "2"
+exclude = ["firmware/fbw-rp2040"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.88"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+float_cmp = "allow"
+module_name_repetitions = "allow"

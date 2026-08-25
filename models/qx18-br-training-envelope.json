@@ -1,0 +1,252 @@
+{
+  "$schema": "./model-contract.schema.json",
+  "schema_version": "0.8.0",
+  "metadata": {
+    "name": "QX-18-BR-training-envelope-v0.8",
+    "provenance": "Real QX-18 geometry plus a fixed-revision BR Simulator behavior reconstruction and datasheet-based avionics profiles",
+    "validation_status": "training-only-unvalidated-high-alpha-model",
+    "valid_for": "FBW software stress tests reproducing the public BR Simulator's steady coefficient build-up from -12 to 20 deg; not stall prediction or safety validation",
+    "sources": [
+      {
+        "id": "qx18-official-drawing",
+        "url": "https://www.q-birdman.jp/history/images/qx-18.pdf",
+        "applies_to": "Real aircraft identity, mass, geometry, cruise speed, tail size and control travel",
+        "authority": "Kyushu University Birdman Team"
+      },
+      {
+        "id": "br-simulator-qx18-fixed-revision",
+        "url": "https://github.com/mtkbirdman/mtkbirdman.com/blob/736fa36bcb3bfd65c7808b19e9d215682af2671a/BirdmanRallySim/Plane/AerodynamicCalculator.cs",
+        "applies_to": "Inertia, trim, CLMAX=1.7, component lift clipping, alpha-cubed parasite drag, induced drag and stability derivatives",
+        "authority": "Public third-party simulator implementation; not flight-test identification"
+      },
+      {
+        "id": "torica-2023-avionics",
+        "url": "https://771-8bit.com/blog/birdman-glider-avionics/",
+        "applies_to": "Evidence that KRS-4034HV, BNO055, DPS310 and SDP810-500Pa were used on a Birdman glider",
+        "authority": "Tokyo University of Science Torica avionics lead"
+      },
+      {
+        "id": "krs-4034hv-official",
+        "url": "https://kondo-robot.com/product/krs-4034hv-ics",
+        "applies_to": "Servo speed, travel, voltage and interface",
+        "authority": "Kondo Kagaku manufacturer specification"
+      },
+      {
+        "id": "bno055-official",
+        "url": "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf",
+        "applies_to": "IMU fusion output rate and register resolution",
+        "authority": "Bosch Sensortec datasheet revision 1.8"
+      },
+      {
+        "id": "sdp810-official",
+        "url": "https://sensirion.com/file/datasheet_sdp800-d/",
+        "applies_to": "Differential pressure range, resolution and response time",
+        "authority": "Sensirion SDP800 series datasheet version 1.1"
+      },
+      {
+        "id": "dps310-official",
+        "url": "https://www.infineon.com/dgdl/Infineon-DPS310-DataSheet-v01_02-EN.pdf?fileId=5546d462576f34750157750826c42242",
+        "applies_to": "Static pressure rate and resolution",
+        "authority": "Infineon DPS310 datasheet version 1.2"
+      },
+      {
+        "id": "setsunan-launch-sequence",
+        "url": "https://setsunan.repo.nii.ac.jp/records/1270",
+        "applies_to": "Reference-controller launch, acceleration-dive and pull-out phase concept",
+        "authority": "Setsunan University departmental bulletin paper"
+      },
+      {
+        "id": "ga-nlfs6-flight-path-strategy",
+        "url": "https://mtkbirdman.com/ga-nlfs6",
+        "applies_to": "Minus-three-degree dive and wind-dependent flight-path strategy",
+        "authority": "Public Birdman glider 6DoF optimization by its developer"
+      },
+      {
+        "id": "aircraft-pilot-flight-report",
+        "url": "https://aircraftact.blog53.fc2.com/blog-entry-139.html",
+        "applies_to": "Pilot account of down input suppressing re-ascent after pull-out",
+        "authority": "Birdman glider pilot flight report"
+      },
+      {
+        "id": "team-tinker-gemini-x-strategy",
+        "url": "https://mtkbirdman.com/team-tinker-3rd-gen-gemini-x-design",
+        "applies_to": "Straight steady launch when speed is sufficient, slight dive only when needed, and avoidance of unnecessary pull-out maneuvers",
+        "authority": "Public Birdman glider design report by its designer"
+      },
+      {
+        "id": "kyushu-2025-pilot-report",
+        "url": "https://q-birdman.lix.jp/2025/08/05/%E9%B3%A5%E4%BA%BA%E9%96%93%E3%82%B3%E3%83%B3%E3%83%86%E3%82%B9%E3%83%882025%E3%82%92%E6%8C%AF%E3%82%8A%E8%BF%94%E3%81%A3%E3%81%A6ver-%E3%83%91%E3%82%A4%E3%83%AD%E3%83%83%E3%83%88/",
+        "applies_to": "Pilot account of excessive down/up correction and simulator-assisted recovery to steady glide",
+        "authority": "Kyushu University Birdman Team pilot report"
+      },
+      {
+        "id": "kyushu-2025-designer-report",
+        "url": "https://q-birdman.lix.jp/2025/07/29/%E9%B3%A5%E4%BA%BA%E9%96%93%E3%82%B3%E3%83%B3%E3%83%86%E3%82%B9%E3%83%882025%E3%82%92%E6%8C%AF%E3%82%8A%E8%BF%94%E3%81%A3%E3%81%A6ver-%E8%8A%9D%E7%94%B0/",
+        "applies_to": "Design measures that reduce the difficulty of the launch-to-steady-glide transition",
+        "authority": "Kyushu University Birdman Team designer report"
+      },
+      {
+        "id": "nasa-one-minus-cosine-gust",
+        "url": "https://ntrs.nasa.gov/api/citations/20180000681/downloads/20180000681.pdf",
+        "applies_to": "Deterministic one-minus-cosine gust profile shape",
+        "authority": "NASA technical report; profile shape only, not Birdman gust magnitude"
+      }
+    ],
+    "assumptions": [
+      "The high-alpha table reproduces the public BR Simulator equations at zero control, zero rate and no ground effect; it is not measured QX-18 stall data",
+      "The BR model clips wing and tail lift independently at CLMAX=1.7 but does not model lift drop, hysteresis, dynamic stall, flow separation or unsteady aerodynamics",
+      "The table retains the BR alpha-cubed parasite-drag term and induced-drag term, so it is behaviorally different from holding the 8 degree endpoint",
+      "The separate linear elevator derivatives do not reproduce component-level tail clipping and are restricted to the supplied -12 through 20 degree envelope",
+      "Unity principal inertia and rotation are transformed to the documented FRD tensor convention",
+      "A one-to-one KRS-4034HV linkage is assumed; actual QX-18 actuator dynamics are not public",
+      "Servo lag, deadband and command resolution are explicit engineering assumptions",
+      "Nominal sensor biases are zero; pitot coefficient is one and tubing dynamics are not identified",
+      "The scenario starts at platform release at 5.0 m/s and a 3 degree downward flight path based on user-provided launch conditions",
+      "The reference controller is a software test strategy, not a flight-test-identified QX-18 controller",
+      "Ground-climb feedback updates its altitude derivative only when the 32 Hz sample-and-hold barometric value changes, holds the estimate between samples and applies a 0.25 second filter; transport delay, weather pressure changes and pressure noise are not modeled",
+      "The -0.25 m/s ground-climb barrier and 0.9 rad per m/s gain are deterministic gust-stress settings, not flight-identified handling-quality requirements",
+      "With invalid airspeed, the 0.25 second path look-ahead and 0.75 through 2.0 m relative barometric altitude-loss blend are derived from the reconstructed nominal trajectory, not identified flight data",
+      "The higher glide pitch-rate damping gain latches only after airspeed reaches the pull-out completion speed and flight path recovers to -3 degrees, then blends in over 0.25 seconds",
+      "Ground effect corrects only the induced-drag term; BR downwash, tail-lift and pitching-moment ground effects are not reconstructed",
+      "The default one-minus-cosine gust is disabled; evaluation magnitudes and lengths are engineering stress cases, not identified Lake Biwa statistics"
+    ]
+  },
+  "mass_properties": {
+    "mass_kg": 93.875,
+    "inertia_body_kg_m2": {
+      "ixx": 876.5039836,
+      "iyy": 76.0,
+      "izz": 946.4960164,
+      "ixz": -5.9606070
+    }
+  },
+  "reference_geometry": {
+    "area_m2": 18.042,
+    "span_m": 25.133,
+    "chord_m": 0.757,
+    "moment_reference": "BR Simulator centre of mass transformed to body x forward, y right, z down"
+  },
+  "aerodynamics": {
+    "out_of_range_policy": "terminate",
+    "longitudinal_table": [
+      { "alpha_deg": -12.0, "cl": -0.620496, "cd": 0.064355, "cm": 0.306213 },
+      { "alpha_deg": -8.0, "cl": -0.166677, "cd": 0.030908, "cm": 0.216690 },
+      { "alpha_deg": -5.0, "cl": 0.173688, "cd": 0.021375, "cm": 0.149548 },
+      { "alpha_deg": 0.0, "cl": 0.740962, "cd": 0.023260, "cm": 0.037644 },
+      { "alpha_deg": 1.682, "cl": 0.931793, "cd": 0.026435, "cm": 0.0 },
+      { "alpha_deg": 4.0, "cl": 1.194781, "cd": 0.033256, "cm": -0.051878 },
+      { "alpha_deg": 8.0, "cl": 1.648601, "cd": 0.056680, "cm": -0.141401 },
+      { "alpha_deg": 10.0, "cl": 1.728759, "cd": 0.071323, "cm": -0.199459 },
+      { "alpha_deg": 12.0, "cl": 1.740343, "cd": 0.089683, "cm": -0.263730 },
+      { "alpha_deg": 15.0, "cl": 1.757719, "cd": 0.130932, "cm": -0.360137 },
+      { "alpha_deg": 19.0, "cl": 1.780887, "cd": 0.217743, "cm": -0.488679 },
+      { "alpha_deg": 20.0, "cl": 1.786679, "cd": 0.246113, "cm": -0.520814 }
+    ],
+    "derivatives_per_rad": {
+      "cl_elevator": 0.33185949,
+      "cm_elevator": -1.84122836,
+      "cm_pitch_rate": -20.43106765,
+      "cy_beta": -0.13808283,
+      "cy_roll_rate": -0.228437,
+      "cy_yaw_rate": 0.090542,
+      "cy_rudder": 0.10932035,
+      "c_roll_beta": -0.11470615,
+      "c_roll_roll_rate": -0.877559,
+      "c_roll_yaw_rate": 0.237651,
+      "c_roll_rudder": 0.00297938,
+      "cn_beta": -0.00338045,
+      "cn_roll_rate": -0.142441,
+      "cn_yaw_rate": -0.000491,
+      "cn_rudder": -0.01501149
+    },
+    "ground_effect": {
+      "enabled": true,
+      "wing_height_offset_m": 0.0,
+      "induced_drag_factor": 0.00958031813255601,
+      "minimum_induced_drag_ratio": 0.215,
+      "correlation_gain": 33.0,
+      "height_exponent": 1.5
+    }
+  },
+  "actuators": {
+    "elevator": {
+      "max_abs_deg": 10.0,
+      "max_rate_deg_s": 352.9411765,
+      "time_constant_s": 0.06,
+      "deadband_deg": 0.1,
+      "command_resolution_deg": 0.1
+    },
+    "rudder": {
+      "max_abs_deg": 10.0,
+      "max_rate_deg_s": 352.9411765,
+      "time_constant_s": 0.06,
+      "deadband_deg": 0.1,
+      "command_resolution_deg": 0.1
+    }
+  },
+  "sensors": {
+    "imu": {
+      "sample_rate_hz": 100.0,
+      "gyro_bias_deg_s": [0.0, 0.0, 0.0],
+      "gyro_resolution_deg_s": 0.0625,
+      "euler_resolution_deg": 0.0625,
+      "acceleration_resolution_mps2": 0.01
+    },
+    "air_data": {
+      "sample_rate_hz": 32.0,
+      "differential_pressure_range_pa": 500.0,
+      "differential_pressure_resolution_pa": 0.0166666667,
+      "differential_pressure_bias_pa": 0.0,
+      "differential_pressure_time_constant_s": 0.003,
+      "pitot_coefficient": 1.0,
+      "static_pressure_resolution_pa": 0.06,
+      "static_pressure_bias_pa": 0.0
+    },
+    "alpha_bias_deg": 0.0,
+    "alpha_resolution_deg": 0.1
+  },
+  "environment": {
+    "density_kg_m3": 1.164,
+    "gravity_mps2": 9.80665,
+    "wind_ned_mps": [0.0, 0.0, 0.0],
+    "one_minus_cosine_gust": {
+      "enabled": false,
+      "start_north_m": 60.0,
+      "length_m": 40.0,
+      "peak_wind_ned_mps": [0.0, 0.0, 0.0]
+    }
+  },
+  "initial_state": {
+    "altitude_m": 10.5,
+    "airspeed_mps": 5.0,
+    "alpha_deg": 1.682,
+    "roll_deg": 0.0,
+    "pitch_deg": -1.318,
+    "heading_deg": 0.0
+  },
+  "reference_controller": {
+    "pull_out_start_airspeed_mps": 6.0,
+    "pull_out_full_airspeed_mps": 7.5,
+    "launch_target_alpha_deg": 6.0,
+    "launch_elevator_feedforward_deg": 0.0,
+    "failsafe_elevator_deg": 0.75,
+    "launch_alpha_gain": 1.5,
+    "glide_target_flight_path_deg": -1.7,
+    "flight_path_gain": 0.9,
+    "flight_path_lookahead_s": 0.1,
+    "degraded_flight_path_lookahead_s": 0.25,
+    "degraded_pull_out_start_altitude_loss_m": 0.75,
+    "degraded_pull_out_full_altitude_loss_m": 2.0,
+    "climb_limit_flight_path_deg": -1.5,
+    "climb_suppression_gain": 6.0,
+    "ground_climb_limit_mps": -0.25,
+    "ground_climb_suppression_gain_rad_per_mps": 0.9,
+    "vertical_speed_filter_time_constant_s": 0.25,
+    "alpha_limit_deg": 7.5,
+    "alpha_limit_gain": 3.0,
+    "launch_pitch_rate_gain_s": 0.05,
+    "glide_pitch_rate_gain_s": 0.6,
+    "glide_damping_enable_flight_path_deg": -3.0,
+    "glide_damping_transition_time_s": 0.25
+  }
+}

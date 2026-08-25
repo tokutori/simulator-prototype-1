@@ -1,0 +1,139 @@
+# Birdman Flight Dynamics Simulator Prototype 1
+
+鳥人間向けFBW検証環境の最初の実行可能prototypeです。platform-independentな
+`#![no_std]` Rust coreと、JSON/CSVを扱うhost CLIを分離しています。
+
+default sampleは公開QX-18 dataとBR Simulatorの式を再構成した**訓練用・未validation
+high-alpha model**です。実在機の公式諸元、公開simulatorの推定空力値、実搭載例と部品
+datasheetを区別して追跡します。実機挙動、飛距離、stall safetyを予測するflight-test
+同定modelではありません。
+
+## 実装済み
+
+- body Forward-Right-Down（FRD）、navigation North-East-Down（NED）、SI units
+- quaternion姿勢、body velocity、body angular rateによるnonlinear rigid 6DoF
+- fixed-step RK4
+- table内の`Cm = 0`とforce balanceを解く無推力steady-glide trim solver
+- trim近傍のallocation-free 4-state縦運動linearization
+- table-driven `CL/CD/Cm(alpha)`、modelごとのtable外停止またはclamp-and-flag policy
+- beta/rate/control derivativeによる`CY/Cl/Cn`
+- `Ixz`を含むsymmetric inertia tensor
+- elevator/rudderのtravel、rate、first-order lag、deadband、command量子化
+- BNO055相当100 Hz IMU sample-and-hold・register量子化
+- SDP810-500Pa相当のrange・pressure量子化・response、DPS310相当32 Hz barometer
+- strict JSON model loaderとCSV logger
+- native reference energy-management controllerによるclosed-loop smoke test
+- hostとRP2040 firmwareで同じ`#![no_std]` `fbw-control-core`を使用
+- 共有`#![no_std]` safety gateによるhold-last、model指定固定failsafe舵、rearm
+- 5 m/s補助発進caseのAoA→飛行経路角smooth transition、pitch-rate先読み、nominal再浮上防止
+- 32 Hz気圧高度のdistinct sampleだけを差分する対地鉛直速度filter、sink-rate barrier、glide damping
+- 誘導抗力への簡易ground-effect correlationと距離領域1−cos gust
+- Plotters 0.3.7によるflight trajectory、pitch/alpha/flight-path、airspeed、舵角のPNG出力
+- 空力table範囲外をCSV、summary、PNGの赤点で明示
+- 最大飛行経路角、最低高度後の再浮上量、正経路角sample数をsummaryと回帰testで監視
+- nalgebra 0.34.1によるhost側固有mode解析と固有値PNG
+- JSBSim 1.3.1への同一舵角replayによる独立FDM比較
+- controller parameter sweepと決定的model-uncertainty stress cases
+- ground effect/gust/windの環境sweepとRC/実機log比較tool
+- 実RP2040向けELF/UF2、`rp2040-hal` MMIO、`rp2040js` virtual I2C/PWMによるclosed loop
+- BNO055、AS5600、SDP810、DPS310のdatasheet-level register protocolとSDP CRC
+- status/CRC/I²C NACKの決定的fault injectionとactual-UF2永続故障sweep
+- SDP810単独喪失時のheld-airspeed、相対気圧高度pull-outを使うdegraded controlと17 model stress比較
+
+## 実行
+
+Rust 1.88.0を使用します。
+
+```powershell
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo run -p sim-cli -- --model models/qx18-br-training-envelope.json `
+  --output reports/run.csv --plot reports/run.png `
+  --linearization-output reports/longitudinal-linearization.csv `
+  --modes-plot reports/longitudinal-modes.png
+```
+
+RP2040 virtual platformを含む20秒run:
+
+```powershell
+cargo build --manifest-path firmware\fbw-rp2040\Cargo.toml `
+  --target thumbv6m-none-eabi --release
+New-Item -ItemType Directory -Force target\virtual-platform | Out-Null
+elf2uf2-rs firmware\fbw-rp2040\target\thumbv6m-none-eabi\release\fbw-rp2040 `
+  target\virtual-platform\fbw-rp2040.uf2
+cargo build -p sim-cli --bin plant-bridge
+npm.cmd install --prefix virtual-platform
+npm.cmd run check --prefix virtual-platform
+npm.cmd run simulate --prefix virtual-platform -- `
+  --steps 2000 --timing-acceleration 50 --output reports\virtual-platform.csv
+```
+
+firmwareは10 ms固定周期を目標に実センサ互換I²C transactionを行い、KRS-4034HVの許容範囲内にある
+20 ms周期・1000～2000 usのPWMを出す。50倍加速は10～500倍sweepで論理100 Hzを維持した最大値だが、
+deadline、jitter、CPU使用率のvalidationには使わない。
+
+CSVを標準出力へ出す場合:
+
+```powershell
+cargo run -p sim-cli -- --duration 5 --dt 0.01
+```
+
+## 構成
+
+```text
+crates/
+  fbw-control-core/        host/firmware共有、no_std f32 controller
+  fbw-safety-core/         host/firmware共有、no_std sensor-validity gate
+  flight-dynamics-core/  no_std、allocation-free、I/Oなしのphysics core
+  sim-cli/               JSON、CLI、CSVというhost adapter
+firmware/fbw-rp2040/      実target向けno_std firmware
+virtual-platform/         rp2040js、virtual I2C devices、Rust plant bridge
+models/
+  model-contract.schema.json
+  qx18-public-reconstruction.json 出典付きの-5～8 deg strict model
+  qx18-br-training-envelope.json  BR式を-12～20 degで再構成したdefault training model
+  illustrative-hpa.json            架空のsoftware-test用model
+docs/
+  architecture.md
+  qx18-and-avionics-model.md
+  verification.md
+  flight-validation.md
+  roadmap.md
+```
+
+設計根拠と公開事例の検証結果は隣接repository
+[`simulator-search`](../simulator-search/README.md)にあります。
+
+## `embedded-rust-playground`との関係
+
+参照projectの次の境界を維持しています。
+
+```text
+virtual plant -> virtual sensor/peripheral -> actual target firmware
+               actual target firmware -> actuator output -> virtual plant
+```
+
+同じ境界を実装した。firmwareにsimulator専用sensorやconditional mockはなく、実
+`rp2040-hal`がI²C0とPWM0のMMIOを操作し、`rp2040js`がBNO055、AS5600、SDP810、DPS310
+互換transactionを受ける。FDMはTypeScriptへ移植せず、NDJSONの`plant-bridge`を介して
+同じRust physics coreを一stepずつ進める。
+
+## 開発方針との対応
+
+[プロジェクトの開発方針](https://zenn.dev/bem130/articles/1b352797de94e7)に従い、
+coreは`no_std`、filesystem/network/clock非依存、明示入力・明示出力にしています。
+errorはenum、modelはstruct、platform依存処理はCLIへ限定し、prototypeでも公開境界を
+暫定的な雑設計にしない方針です。
+
+## 制約
+
+現在のground effectは誘導抗力だけの未validation簡易式、gustは機体全体一様の決定的pulseです。
+launch contact dynamics、spanwise gust、post-stall lift drop/hysteresis、unsteady aerodynamics、
+aeroelasticity、stochastic noise/fault、電気故障、実時間deadline、flight-qualified firmwareは扱いません。
+決定的status/CRC/NACK faultは実装済みですが、実故障率や共通原因故障を表しません。
+dataの根拠は[QX-18と電装model](docs/qx18-and-avionics-model.md)、残課題は
+[roadmap](docs/roadmap.md)を参照してください。
+
+## License
+
+MIT License. Copyright (c) 2026 Bem130.

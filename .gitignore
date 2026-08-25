@@ -1,0 +1,23 @@
+# Rust build outputs
+/target/
+/**/target/
+
+# Local Python environments
+/.eval-venv/
+/.venv/
+**/__pycache__/
+*.py[cod]
+
+# Node.js dependencies and generated JS output
+/node_modules/
+/**/node_modules/
+/virtual-platform/dist/
+
+# Embedded firmware binaries
+*.elf
+*.uf2
+
+# Generated analysis artifacts
+/reports/**
+/evaluation/__pycache__/
+/firmware/fbw-rp2040/target/

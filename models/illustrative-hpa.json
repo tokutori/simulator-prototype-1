@@ -1,0 +1,155 @@
+{
+  "$schema": "./model-contract.schema.json",
+  "schema_version": "0.8.0",
+  "metadata": {
+    "name": "illustrative-hpa-rigid-v0",
+    "provenance": "Synthetic coefficients for software verification only; not derived from a real Birdman aircraft",
+    "validation_status": "unvalidated-illustrative",
+    "valid_for": "Architecture, coordinate-sign, deterministic replay, and controller-interface tests only",
+    "sources": [
+      {
+        "id": "synthetic",
+        "url": "https://example.invalid/synthetic-model",
+        "applies_to": "No physical data; schema placeholder only",
+        "authority": "synthetic"
+      }
+    ],
+    "assumptions": ["All aircraft coefficients are intentionally synthetic"]
+  },
+  "mass_properties": {
+    "mass_kg": 100.0,
+    "inertia_body_kg_m2": {
+      "ixx": 900.0,
+      "iyy": 100.0,
+      "izz": 980.0,
+      "ixz": 0.0
+    }
+  },
+  "reference_geometry": {
+    "area_m2": 20.0,
+    "span_m": 25.0,
+    "chord_m": 0.85,
+    "moment_reference": "centre of gravity; body x forward, y right, z down"
+  },
+  "aerodynamics": {
+    "out_of_range_policy": "clamp-and-flag",
+    "longitudinal_table": [
+      { "alpha_deg": -10.0, "cl": -0.60, "cd": 0.080, "cm": 0.180 },
+      { "alpha_deg": -5.0, "cl": -0.20, "cd": 0.035, "cm": 0.130 },
+      { "alpha_deg": 0.0, "cl": 0.25, "cd": 0.018, "cm": 0.080 },
+      { "alpha_deg": 4.0, "cl": 0.65, "cd": 0.025, "cm": 0.040 },
+      { "alpha_deg": 8.0, "cl": 1.05, "cd": 0.045, "cm": 0.000 },
+      { "alpha_deg": 12.0, "cl": 1.35, "cd": 0.080, "cm": -0.050 },
+      { "alpha_deg": 15.0, "cl": 1.50, "cd": 0.130, "cm": -0.090 },
+      { "alpha_deg": 18.0, "cl": 1.40, "cd": 0.220, "cm": -0.120 },
+      { "alpha_deg": 22.0, "cl": 1.10, "cd": 0.350, "cm": -0.150 },
+      { "alpha_deg": 25.0, "cl": 0.80, "cd": 0.500, "cm": -0.180 }
+    ],
+    "derivatives_per_rad": {
+      "cl_elevator": 0.0,
+      "cm_elevator": -0.8,
+      "cm_pitch_rate": -12.0,
+      "cy_beta": -0.35,
+      "cy_roll_rate": -0.10,
+      "cy_yaw_rate": 0.20,
+      "cy_rudder": 0.25,
+      "c_roll_beta": -0.08,
+      "c_roll_roll_rate": -0.70,
+      "c_roll_yaw_rate": 0.18,
+      "c_roll_rudder": 0.02,
+      "cn_beta": 0.12,
+      "cn_roll_rate": -0.05,
+      "cn_yaw_rate": -0.20,
+      "cn_rudder": -0.08
+    },
+    "ground_effect": {
+      "enabled": false,
+      "wing_height_offset_m": 0.0,
+      "induced_drag_factor": 0.0,
+      "minimum_induced_drag_ratio": 1.0,
+      "correlation_gain": 1.0,
+      "height_exponent": 1.0
+    }
+  },
+  "actuators": {
+    "elevator": {
+      "max_abs_deg": 12.0,
+      "max_rate_deg_s": 20.0,
+      "time_constant_s": 0.12,
+      "deadband_deg": 0.05,
+      "command_resolution_deg": 0.01
+    },
+    "rudder": {
+      "max_abs_deg": 18.0,
+      "max_rate_deg_s": 25.0,
+      "time_constant_s": 0.15,
+      "deadband_deg": 0.05,
+      "command_resolution_deg": 0.01
+    }
+  },
+  "sensors": {
+    "imu": {
+      "sample_rate_hz": 100.0,
+      "gyro_bias_deg_s": [0.0, 0.0, 0.0],
+      "gyro_resolution_deg_s": 0.0625,
+      "euler_resolution_deg": 0.0625,
+      "acceleration_resolution_mps2": 0.01
+    },
+    "air_data": {
+      "sample_rate_hz": 32.0,
+      "differential_pressure_range_pa": 500.0,
+      "differential_pressure_resolution_pa": 0.0166666667,
+      "differential_pressure_bias_pa": 0.0,
+      "differential_pressure_time_constant_s": 0.003,
+      "pitot_coefficient": 1.0,
+      "static_pressure_resolution_pa": 0.06,
+      "static_pressure_bias_pa": 0.0
+    },
+    "alpha_bias_deg": 0.0,
+    "alpha_resolution_deg": 0.1
+  },
+  "environment": {
+    "density_kg_m3": 1.225,
+    "gravity_mps2": 9.80665,
+    "wind_ned_mps": [0.0, 0.0, 0.0],
+    "one_minus_cosine_gust": {
+      "enabled": false,
+      "start_north_m": 0.0,
+      "length_m": 1.0,
+      "peak_wind_ned_mps": [0.0, 0.0, 0.0]
+    }
+  },
+  "initial_state": {
+    "altitude_m": 10.0,
+    "airspeed_mps": 9.0,
+    "alpha_deg": 8.0,
+    "roll_deg": 0.0,
+    "pitch_deg": 8.0,
+    "heading_deg": 0.0
+  },
+  "reference_controller": {
+    "pull_out_start_airspeed_mps": 7.0,
+    "pull_out_full_airspeed_mps": 8.0,
+    "launch_target_alpha_deg": 3.0,
+    "launch_elevator_feedforward_deg": 0.0,
+    "failsafe_elevator_deg": 0.0,
+    "launch_alpha_gain": 0.5,
+    "glide_target_flight_path_deg": -2.0,
+    "flight_path_gain": 0.35,
+    "flight_path_lookahead_s": 1.5,
+    "degraded_flight_path_lookahead_s": 2.0,
+    "degraded_pull_out_start_altitude_loss_m": 0.75,
+    "degraded_pull_out_full_altitude_loss_m": 2.0,
+    "climb_limit_flight_path_deg": 0.0,
+    "climb_suppression_gain": 1.0,
+    "ground_climb_limit_mps": 0.0,
+    "ground_climb_suppression_gain_rad_per_mps": 0.0,
+    "vertical_speed_filter_time_constant_s": 0.15,
+    "alpha_limit_deg": 8.0,
+    "alpha_limit_gain": 1.0,
+    "launch_pitch_rate_gain_s": 0.2,
+    "glide_pitch_rate_gain_s": 0.2,
+    "glide_damping_enable_flight_path_deg": -3.0,
+    "glide_damping_transition_time_s": 0.25
+  }
+}

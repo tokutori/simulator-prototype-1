@@ -1,0 +1,20 @@
+{
+  "name": "birdman-fbw-virtual-platform",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts",
+    "simulate": "tsx src/run.ts"
+  },
+  "dependencies": {
+    "rp2040js": "1.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "tsx": "4.23.12",
+    "typescript": "5.9.2"
+  }
+}

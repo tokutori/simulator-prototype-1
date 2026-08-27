@@ -41,6 +41,8 @@ datasheetを区別して追跡します。実機挙動、飛距離、stall safet
 - SDP810単独喪失時のheld-airspeed、相対気圧高度pull-outを使うdegraded controlと17 model stress比較
 - Three.jsによる一人称/追従三人称replay、動く波面、start中心距離ring、HUD、CSV読込み
 - keyboard/gamepadの設定可能なelevator/rudder入力とmanual/shared/auto連続authority比較
+- 標準120秒（nominal 10 m/sで約1.2 km）の記録枠、着水・空力範囲逸脱時の早期終了
+- 別tabの飛行後analysis（軌跡、高度、速度、pilot入力、command/実舵角、姿勢）
 
 ## 実行
 
@@ -94,6 +96,11 @@ loopへ移る。keyboard 4 key、gamepad stick、gamepad buttonをelevator/rudde
 選択でき、Auto authorityを0～100%で変更できる。詳細と制約は
 [interactive visualizer](docs/interactive-visualizer.md)を参照する。
 
+CLIの標準記録上限は120秒であり、nominal 10 m/sなら約1.2 kmを収容する。これは飛距離を
+1 kmへ強制する設定ではなく、着水または空力table範囲逸脱時にはその時点で記録を終了する。
+標準sample機は現在のmodel/controlでは約236 mで着水する。viewerの`Flight analysis`から、
+現在のreplayまたはinteractive flightを別tabで時系列解析できる。
+
 ## 構成
 
 ```text
@@ -116,6 +123,7 @@ docs/
   verification.md
   flight-validation.md
   interactive-visualizer.md
+  post-flight-analysis.md
   ui-scaling.md
   roadmap.md
 ```

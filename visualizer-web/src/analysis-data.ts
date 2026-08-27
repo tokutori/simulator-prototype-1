@@ -1,0 +1,90 @@
+import type { FlightFrame } from "./types.ts";
+
+export const analysisStorageKey = "birdman-flight-analysis-v1";
+
+export interface FlightAnalysisDataset {
+  version: 1;
+  name: string;
+  storedAtIso: string;
+  frames: FlightFrame[];
+}
+
+export interface FlightSummary {
+  durationS: number;
+  rangeM: number;
+  trackM: number;
+  maximumAltitudeM: number;
+  finalAirspeedMps: number;
+  maximumAbsRollDeg: number;
+  surfaceContact: boolean;
+}
+
+export function prepareAnalysisDataset(
+  name: string,
+  frames: readonly FlightFrame[],
+  storedAt = new Date(),
+  maximumFrames = 1600,
+): FlightAnalysisDataset {
+  if (frames.length < 2) throw new Error("analysis requires at least two flight frames");
+  return {
+    version: 1,
+    name,
+    storedAtIso: storedAt.toISOString(),
+    frames: downsampleFrames(frames, maximumFrames),
+  };
+}
+
+export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
+  const candidate = JSON.parse(raw) as Partial<FlightAnalysisDataset>;
+  if (candidate.version !== 1 || typeof candidate.name !== "string" || !Array.isArray(candidate.frames)) {
+    throw new Error("stored flight analysis has an unsupported format");
+  }
+  if (candidate.frames.length < 2 || candidate.frames.some((frame) =>
+    typeof frame !== "object"
+    || frame === null
+    || !Number.isFinite((frame as FlightFrame).timeS)
+    || !Number.isFinite((frame as FlightFrame).northM)
+    || !Number.isFinite((frame as FlightFrame).altitudeM))) {
+    throw new Error("stored flight analysis contains invalid telemetry");
+  }
+  return candidate as FlightAnalysisDataset;
+}
+
+export function downsampleFrames(frames: readonly FlightFrame[], maximumFrames: number): FlightFrame[] {
+  if (maximumFrames < 2) throw new Error("maximumFrames must be at least two");
+  if (frames.length <= maximumFrames) return [...frames];
+  const result: FlightFrame[] = [];
+  const denominator = maximumFrames - 1;
+  for (let index = 0; index < maximumFrames; index += 1) {
+    const sourceIndex = Math.round((index * (frames.length - 1)) / denominator);
+    const frame = frames[sourceIndex];
+    if (frame && result.at(-1) !== frame) result.push(frame);
+  }
+  return result;
+}
+
+export function summarizeFlight(frames: readonly FlightFrame[]): FlightSummary {
+  const first = frames[0];
+  const last = frames.at(-1);
+  if (!first || !last) throw new Error("cannot summarize an empty flight");
+  let trackM = 0;
+  let maximumAltitudeM = Number.NEGATIVE_INFINITY;
+  let maximumAbsRollRad = 0;
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    if (!frame) continue;
+    maximumAltitudeM = Math.max(maximumAltitudeM, frame.altitudeM);
+    maximumAbsRollRad = Math.max(maximumAbsRollRad, Math.abs(frame.rollRad));
+    const previous = frames[index - 1];
+    if (previous) trackM += Math.hypot(frame.northM - previous.northM, frame.eastM - previous.eastM);
+  }
+  return {
+    durationS: last.timeS - first.timeS,
+    rangeM: Math.hypot(last.northM - first.northM, last.eastM - first.eastM),
+    trackM,
+    maximumAltitudeM,
+    finalAirspeedMps: last.airspeedMps,
+    maximumAbsRollDeg: maximumAbsRollRad * 180 / Math.PI,
+    surfaceContact: last.surfaceContact,
+  };
+}

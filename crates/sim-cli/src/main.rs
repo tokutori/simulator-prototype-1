@@ -20,7 +20,10 @@ use sim_cli::config::{ConfigError, LoadedSimulation, OutOfRangePolicy, deg_to_ra
 use sim_cli::controller::{ControlDecision, ReferenceControllerState};
 
 const DEFAULT_MODEL: &str = "models/qx18-br-training-envelope.json";
-const DEFAULT_DURATION_S: f64 = 20.0;
+// A 120 s horizon covers about 1.2 km at the nominal 10 m/s glide speed.
+// Simulation still terminates earlier on water contact or an aerodynamic
+// envelope exit; this is a recording capacity, not a forced flight length.
+const DEFAULT_DURATION_S: f64 = 120.0;
 const DEFAULT_DT_S: f64 = 0.01;
 
 fn main() -> ExitCode {
@@ -146,7 +149,7 @@ fn simulate(
 
     writeln!(
         writer,
-        "time_s,north_m,east_m,altitude_m,u_mps,v_mps,w_mps,roll_deg,pitch_deg,yaw_deg,flight_path_deg,p_rad_s,q_rad_s,r_rad_s,airspeed_mps,alpha_deg,beta_deg,elevator_deg,elevator_command_deg,rudder_deg,sensor_pitch_deg,sensor_q_rad_s,sensor_airspeed_mps,sensor_dp_pa,sensor_baro_altitude_m,sensor_alpha_deg,estimated_vertical_speed_mps,vertical_speed_estimate_valid,wind_north_mps,wind_east_mps,wind_down_mps,ground_effect_induced_drag_ratio,aero_in_range"
+        "time_s,north_m,east_m,altitude_m,u_mps,v_mps,w_mps,roll_deg,pitch_deg,yaw_deg,flight_path_deg,p_rad_s,q_rad_s,r_rad_s,airspeed_mps,alpha_deg,beta_deg,elevator_deg,elevator_command_deg,rudder_deg,sensor_pitch_deg,sensor_q_rad_s,sensor_airspeed_mps,sensor_dp_pa,sensor_baro_altitude_m,sensor_alpha_deg,estimated_vertical_speed_mps,vertical_speed_estimate_valid,wind_north_mps,wind_east_mps,wind_down_mps,ground_effect_induced_drag_ratio,aero_in_range,surface_contact"
     )
     .map_err(AppError::Io)?;
 
@@ -286,7 +289,7 @@ fn write_sample(writer: &mut dyn Write, sample: &TelemetrySample) -> Result<(), 
     let euler = sample.state.attitude_body_to_ned.to_euler();
     writeln!(
         writer,
-        "{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{}",
+        "{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{:.6},{},{:.6},{:.6},{:.6},{:.6},{},{}",
         sample.time_s,
         sample.state.position_ned_m.x,
         sample.state.position_ned_m.y,
@@ -320,6 +323,7 @@ fn write_sample(writer: &mut dyn Write, sample: &TelemetrySample) -> Result<(), 
         sample.environment.wind_ned_mps.z,
         sample.loads.induced_drag_ground_effect_ratio,
         sample.aero_in_range,
+        sample.state.position_ned_m.z >= 0.0,
     )
     .map_err(AppError::Io)
 }
@@ -958,6 +962,38 @@ struct Summary {
 #[cfg(test)]
 mod scenario_tests {
     use super::*;
+
+    #[test]
+    fn default_recording_horizon_covers_one_kilometre_at_nominal_speed() {
+        let args = Args::parse(std::iter::empty()).expect("default arguments must parse");
+
+        assert_eq!(args.duration_s, 120.0);
+        assert!(args.duration_s * 10.0 >= 1_000.0);
+    }
+
+    #[test]
+    fn long_horizon_records_surface_contact_explicitly() {
+        let model_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/qx18-br-training-envelope.json");
+        let loaded = LoadedSimulation::load(&model_path).expect("sample model must load");
+        let mut csv = Vec::new();
+        let summary = simulate(&loaded, DEFAULT_DURATION_S, DEFAULT_DT_S, &mut csv)
+            .expect("reference scenario must reach the surface");
+        let csv = String::from_utf8(csv).expect("CSV must be UTF-8");
+
+        assert_eq!(summary.termination, Termination::SurfaceContact);
+        assert!(summary.time_s < DEFAULT_DURATION_S);
+        assert!(
+            csv.lines()
+                .next()
+                .is_some_and(|header| header.ends_with("surface_contact"))
+        );
+        assert!(
+            csv.lines()
+                .next_back()
+                .is_some_and(|row| row.ends_with("true"))
+        );
+    }
 
     #[test]
     fn qx18_reference_control_does_not_reascend() {

@@ -19,6 +19,7 @@ const selectedColumns = [
   "elevator_deg",
   "rudder_deg",
   "elevator_command_deg",
+  "surface_contact",
 ];
 
 const lines = readFileSync(inputPath, "utf8").replace(/^\uFEFF/, "").trim().split(/\r?\n/);

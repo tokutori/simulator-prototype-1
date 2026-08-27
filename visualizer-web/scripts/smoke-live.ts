@@ -9,6 +9,10 @@ const sampleResponse = await fetch(`${baseUrl}/sample-flight.csv`);
 if (!sampleResponse.ok || !(await sampleResponse.text()).startsWith("time_s,north_m")) {
   throw new Error("sample replay is unavailable");
 }
+const analysisResponse = await fetch(`${baseUrl}/analysis.html`);
+if (!analysisResponse.ok || !(await analysisResponse.text()).includes("Birdman Flight Analysis")) {
+  throw new Error("post-flight analysis is unavailable");
+}
 
 const socket = new WebSocket(baseUrl.replace(/^http/, "ws") + "/live");
 let observations = 0;
@@ -53,7 +57,7 @@ await new Promise<void>((resolve, reject) => {
 });
 
 clearTimeout(timeout);
-process.stdout.write(`Validated HTTP replay and ${observations} live observations\n`);
+process.stdout.write(`Validated HTTP replay, analysis page, and ${observations} live observations\n`);
 
 function finite(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {

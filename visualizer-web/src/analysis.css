@@ -1,0 +1,38 @@
+:root { color-scheme: dark; font-family: Inter, "Segoe UI", system-ui, sans-serif; background: #07131a; color: #edf5f3; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(circle at 50% 0, #123641, #07131a 42rem); }
+.analysis-shell { width: min(96rem, 96vw); margin: 0 auto; padding: max(1.2rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) 3rem max(1rem, env(safe-area-inset-left)); }
+.analysis-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding-bottom: 0.8rem; border-bottom: 1px solid rgba(214, 235, 232, 0.24); }
+.analysis-header p { margin: 0; color: #e6a44c; font: 500 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.14em; }
+.analysis-header h1 { margin: 0.25rem 0 0; font-size: 1.6rem; font-weight: 500; }
+.analysis-header > div:last-child { display: grid; justify-items: end; gap: 0.25rem; }
+.analysis-header strong { color: #8ee0cb; font: 500 0.74rem/1 ui-monospace, monospace; }
+.analysis-header span { color: #9fb6b2; font-size: 0.72rem; }
+.analysis-error { padding: 1rem; color: #ffe4be; border: 1px solid #e6a44c; }
+.summary-grid { display: grid; grid-template-columns: repeat(5, minmax(8rem, 1fr)); gap: 0.7rem; margin: 1rem 0 1.3rem; }
+.summary-grid div { padding: 0.7rem; background: rgba(6, 27, 35, 0.82); border-left: 3px solid #8ee0cb; }
+.summary-grid dt { color: #9fb6b2; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.summary-grid dd { margin: 0.25rem 0 0; color: #e7fff9; font: 500 1.35rem/1 ui-monospace, monospace; }
+.analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+article { min-width: 0; padding: 0.85rem; background: rgba(5, 22, 29, 0.72); border: 1px solid rgba(214, 235, 232, 0.18); }
+article h2 { margin: 0 0 0.6rem; color: #dffbf4; font-size: 0.9rem; font-weight: 500; }
+.chart { width: 100%; min-height: 14rem; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .frame, .chart .grid { fill: none; stroke: rgba(214, 235, 232, 0.2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .grid { stroke: rgba(214, 235, 232, 0.1); }
+.chart text { fill: #9fb6b2; font: 12px ui-monospace, monospace; }
+.chart .axis-title { fill: #dffbf4; }
+.chart .legend text { fill: #c4d8d4; }
+.chart path.series { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart .series-0 { stroke: #8ee0cb; }
+.chart .series-1 { stroke: #e6a44c; }
+.chart .series-2 { stroke: #c0a8ff; }
+.chart .series-3 { stroke: #f18470; }
+.chart .series-4 { stroke: #83aef2; }
+.chart .ring { fill: none; stroke: rgba(142, 224, 203, 0.22); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .trajectory { fill: none; stroke: #e6a44c; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.chart .start { fill: #8ee0cb; }
+.chart .finish { fill: #f18470; }
+@media (min-width: 170rem) { .analysis-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 70rem) { .summary-grid { grid-template-columns: repeat(3, minmax(7rem, 1fr)); } .analysis-grid { grid-template-columns: 1fr; } }
+@media (max-width: 38rem) { .analysis-header { align-items: flex-start; } .analysis-header > div:last-child { justify-items: start; } .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

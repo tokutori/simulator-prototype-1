@@ -19,6 +19,7 @@ import {
 } from "three";
 
 import "./style.css";
+import { analysisStorageKey, prepareAnalysisDataset } from "./analysis-data.ts";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
 import { createDistanceRings } from "./distance-rings.ts";
@@ -61,6 +62,7 @@ const environment = buildEnvironment(scene);
 let mode: AppMode = "replay";
 let cameraMode: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
+let replayName = "sample-flight.csv";
 let liveFrames: FlightFrame[] = [];
 let liveFrame: FlightFrame | undefined;
 let playbackTimeS = 0;
@@ -230,6 +232,8 @@ function bindControls(): void {
   element<HTMLButtonElement>("replay-mode").addEventListener("click", () => setMode("replay"));
   element<HTMLButtonElement>("live-mode").addEventListener("click", () => setMode("live"));
   element<HTMLButtonElement>("restart-live").addEventListener("click", connectLive);
+  element<HTMLButtonElement>("open-analysis").addEventListener("click", openCurrentAnalysis);
+  element<HTMLButtonElement>("flight-event-analysis").addEventListener("click", openCurrentAnalysis);
   element<HTMLButtonElement>("play-pause").addEventListener("click", () => {
     replayPlaying = !replayPlaying;
     if (replayPlaying && playbackTimeS >= (replayFrames.at(-1)?.timeS ?? 0)) {
@@ -341,11 +345,13 @@ async function loadDefaultReplay(): Promise<void> {
 
 function loadReplay(frames: FlightFrame[], name: string): void {
   replayFrames = frames;
+  replayName = name;
   playbackTimeS = frames[0]?.timeS ?? 0;
   replayPlaying = true;
   updatePlayButton();
   buildTrajectory(frames);
   element("connection-status").textContent = name;
+  element<HTMLButtonElement>("open-analysis").disabled = frames.length < 2;
   setMode("replay");
   hideMessage();
 }
@@ -388,6 +394,7 @@ function connectLive(): void {
   liveFrames = [];
   pilotInput.clear();
   element<HTMLButtonElement>("download-live").disabled = true;
+  element<HTMLButtonElement>("open-analysis").disabled = true;
   element("connection-status").textContent = "connecting…";
   setFlightEvent("SYSTEM READY", "READY", "Waiting for the first RP2040-independent host FDM sample");
   setPhaseBadge("ready");
@@ -408,6 +415,7 @@ function connectLive(): void {
       liveFrame = frameFromLive(message);
       liveFrames.push(liveFrame);
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
+      element<HTMLButtonElement>("open-analysis").disabled = liveFrames.length < 2;
     } catch (error) {
       showMessage(`Live telemetry error: ${String(error)}`);
     }
@@ -480,12 +488,14 @@ function updateFlightPhase(frame: FlightFrame): void {
       "FLIGHT COMPLETE",
       "WATER CONTACT",
       `T+ ${formatFlightTime(elapsedS)} · RANGE ${rangeM.toFixed(1)} m · IAS ${frame.airspeedMps.toFixed(1)} m/s`,
+      "Review flight",
     );
   } else if (phase === "record-ended") {
     setFlightEvent(
       "DATA STATUS",
       "END OF RECORDING",
       `T+ ${formatFlightTime(elapsedS)} · ALT ${frame.altitudeM.toFixed(1)} m · no water contact in this record`,
+      "Review record",
     );
   } else {
     element("flight-event").hidden = true;
@@ -496,11 +506,28 @@ function setPhaseBadge(phase: FlightPhase): void {
   element("phase-badge").textContent = phase.replaceAll("-", " ").toUpperCase();
 }
 
-function setFlightEvent(kicker: string, title: string, detail: string): void {
+function setFlightEvent(kicker: string, title: string, detail: string, actionLabel?: string): void {
   element("flight-event-kicker").textContent = kicker;
   element("flight-event-title").textContent = title;
   element("flight-event-detail").textContent = detail;
-  element("flight-event").hidden = false;
+  const event = element("flight-event");
+  const action = element<HTMLButtonElement>("flight-event-analysis");
+  action.textContent = actionLabel ?? "";
+  action.hidden = actionLabel === undefined;
+  event.classList.toggle("has-actions", actionLabel !== undefined);
+  event.hidden = false;
+}
+
+function openCurrentAnalysis(): void {
+  const frames = mode === "live" ? liveFrames : replayFrames;
+  if (frames.length < 2) return;
+  const name = mode === "live" ? "interactive flight" : replayName;
+  try {
+    localStorage.setItem(analysisStorageKey, JSON.stringify(prepareAnalysisDataset(name, frames)));
+    window.open("/analysis.html", "_blank", "noopener");
+  } catch (error) {
+    showMessage(`Flight analysis could not be opened: ${String(error)}`);
+  }
 }
 
 function setSurfaceTrack(id: string, actualDeg: number, commandDeg: number): void {

@@ -107,6 +107,12 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
     }
     return value;
   };
+  const boolean = (name: string): boolean => {
+    const raw = row.get(name)?.toLowerCase();
+    if (raw === undefined || raw === "" || raw === "0" || raw === "false") return false;
+    if (raw === "1" || raw === "true") return true;
+    throw new Error(`invalid boolean ${name} at CSV row ${lineNumber}`);
+  };
   return {
     timeS: number("time_s"),
     northM: number("north_m"),
@@ -132,7 +138,7 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
       number("mixed_elevator_command_deg", number("elevator_command_deg")) * degree,
     mixedRudderCommandRad:
       number("mixed_rudder_command_deg", number("rudder_command_deg")) * degree,
-    surfaceContact: number("surface_contact") !== 0,
+    surfaceContact: boolean("surface_contact"),
   };
 }
 

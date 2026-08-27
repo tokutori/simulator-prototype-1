@@ -74,6 +74,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .flight-event span { display: block; color: #e6a44c; font: 500 0.65rem/1 ui-monospace, monospace; letter-spacing: 0.16em; }
 .flight-event strong { display: block; margin-top: 0.25rem; font: 500 clamp(1.5rem, 5vw, 2.7rem)/1 ui-monospace, monospace; letter-spacing: 0.08em; }
 .flight-event p { margin: 0.38rem 0 0; color: #b8cbc8; font: 0.72rem/1.3 ui-monospace, monospace; }
+.flight-event.has-actions { pointer-events: auto; }
+.flight-event button { margin-top: 0.65rem; }
 
 .camera-controls { top: 1rem; left: 50%; transform: translateX(-50%); display: flex; gap: 0.35rem; }
 .bottom-panel { left: max(1rem, env(safe-area-inset-left)); right: max(1rem, env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); padding: 0.65rem; background: rgba(5, 18, 24, 0.86); border: 1px solid rgba(214, 235, 232, 0.22); border-radius: 6px; backdrop-filter: blur(10px); }

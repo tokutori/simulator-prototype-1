@@ -21,8 +21,9 @@ IDはrepository内で一意とし、完了条件が満たされるまで`done`�
 | SIM-009 | partial | RC log validation | 共通CSV比較/残差toolは実装。logger adapter、doublet log、parameter fit、holdout実測が残る |
 | SIM-010 | planned | HPA TF identification | target機の係数、delay、不確かさを更新 |
 | SIM-011 | planned | aeroelastic extension gate | modal testとcontroller bandwidthから要否判定 |
-| SIM-018 | implemented | interactive first/third-person viewer | Three.js replay、Rust live bridge、keyboard/gamepad button/axis、manual/shared/auto log。browser visual QAと実cockpit操作試験は継続 |
-| SIM-019 | planned | production-UF2 pilot input/rudder path | 実機入力hardwareを選定し、actual firmwareのADC/PWM/I2C input、rudder PWM、fault injectionをvirtual platform/HILで検証 |
+| SIM-018 | implemented | interactive first/third-person viewer | Three.js replay、actual-UF2 live bridge、keyboard/gamepad button/axis、manual/shared/auto log、TEA state。browser visual QAと実cockpit操作試験は継続 |
+| SIM-019 | implemented | production-UF2 pilot input/rudder path | ADC 3ch、button GPIO、I2C sensor、dual PWMをactual firmware/rp2040jsで閉loop化。実input hardware選定、電気fault、physical HILは継続 |
+| SIM-020 | done | rp2040js real-time monitor | processing ms、wall-clock ratio、lag、deadline missをtelemetry化し、性能不足をTEA warning stateで常時表示 |
 
 `SIM-008`は`embedded-rust-playground`のUF2 load、`VTOR=0x10000100`、vector-tableのSP/PC、
 virtual I2C/PWM boundaryを参照した。BNO055/AS5600/SDP810/DPS310互換registerをactual

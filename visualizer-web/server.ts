@@ -11,19 +11,21 @@ interface PilotCommand {
   pilot_elevator: number;
   pilot_rudder: number;
   autonomy: number;
+  elevator_input_kind: "analog" | "buttons";
+  rudder_input_kind: "analog" | "buttons";
 }
 
 const visualizerDirectory = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(visualizerDirectory, "..");
-const executableName = process.platform === "win32" ? "interactive-bridge.exe" : "interactive-bridge";
-const bridgePath = resolve(projectDirectory, "target", "debug", executableName);
-const modelPath = resolve(projectDirectory, "models", "qx18-br-training-envelope.json");
+const tsxCliPath = resolve(projectDirectory, "virtual-platform", "node_modules", "tsx", "dist", "cli.mjs");
+const webBridgePath = resolve(projectDirectory, "virtual-platform", "src", "web-bridge.ts");
+const uf2Path = resolve(projectDirectory, "target", "virtual-platform", "fbw-rp2040.uf2");
 const port = Number.parseInt(process.env.BIRDMAN_VISUALIZER_PORT ?? "4173", 10);
 const stepPeriodMs = 10;
 const inputTimeoutMs = 250;
 
-if (!existsSync(bridgePath)) {
-  throw new Error(`interactive bridge not found: ${bridgePath}; run npm run build:bridge`);
+for (const path of [tsxCliPath, webBridgePath, uf2Path]) {
+  if (!existsSync(path)) throw new Error(`actual-UF2 web dependency not found: ${path}; run npm install in virtual-platform and npm run build:platform`);
 }
 
 const vite = await createViteServer({
@@ -50,15 +52,19 @@ httpServer.on("upgrade", (request, socket, head) => {
 });
 
 webSockets.on("connection", (webSocket) => {
-  let command: PilotCommand = { pilot_elevator: 0, pilot_rudder: 0, autonomy: 1 };
+  let command: PilotCommand = {
+    pilot_elevator: 0,
+    pilot_rudder: 0,
+    autonomy: 1,
+    elevator_input_kind: "analog",
+    rudder_input_kind: "analog",
+  };
   let lastInputAt = Date.now();
   let bridge: ChildProcessWithoutNullStreams | undefined;
+  let stepTimer: ReturnType<typeof setTimeout> | undefined;
+  let nextStepAtMs = 0;
   try {
-    bridge = spawn(
-      bridgePath,
-      ["--model", modelPath, "--dt", String(stepPeriodMs / 1000)],
-      { cwd: projectDirectory, windowsHide: true },
-    );
+    bridge = spawn(process.execPath, [tsxCliPath, webBridgePath], { cwd: projectDirectory, windowsHide: true });
   } catch (error) {
     sendJson(webSocket, { type: "error", message: String(error) });
     webSocket.close();
@@ -67,9 +73,23 @@ webSockets.on("connection", (webSocket) => {
 
   const lines = createInterface({ input: bridge.stdout });
   lines.on("line", (line) => {
+    try {
+      const status = JSON.parse(line) as { type?: string; backend?: string };
+      if (status.type === "ready") {
+        if (status.backend !== "rp2040js-actual-uf2") throw new Error("unexpected MCU backend");
+        clearTimeout(startupTimer);
+        nextStepAtMs = performance.now();
+        scheduleStep();
+        return;
+      }
+    } catch (error) {
+      sendJson(webSocket, { type: "error", message: `invalid MCU bridge output: ${String(error)}` });
+      return;
+    }
     if (webSocket.readyState === WebSocket.OPEN) {
       webSocket.send(line);
     }
+    scheduleStep();
   });
   let errorText = "";
   bridge.stderr.setEncoding("utf8");
@@ -77,7 +97,8 @@ webSockets.on("connection", (webSocket) => {
     errorText += chunk;
   });
   bridge.on("exit", (code) => {
-    clearInterval(stepTimer);
+    if (stepTimer) clearTimeout(stepTimer);
+    clearTimeout(startupTimer);
     if (webSocket.readyState === WebSocket.OPEN) {
       sendJson(webSocket, {
         type: code === 0 ? "ended" : "error",
@@ -95,12 +116,16 @@ webSockets.on("connection", (webSocket) => {
         typeof parsed.autonomy === "number" &&
         Number.isFinite(parsed.autonomy) &&
         parsed.autonomy >= 0 &&
-        parsed.autonomy <= 1
+        parsed.autonomy <= 1 &&
+        isInputKind(parsed.elevator_input_kind) &&
+        isInputKind(parsed.rudder_input_kind)
       ) {
         command = {
           pilot_elevator: parsed.pilot_elevator,
           pilot_rudder: parsed.pilot_rudder,
           autonomy: parsed.autonomy,
+          elevator_input_kind: parsed.elevator_input_kind,
+          rudder_input_kind: parsed.rudder_input_kind,
         };
         lastInputAt = Date.now();
       }
@@ -109,9 +134,9 @@ webSockets.on("connection", (webSocket) => {
     }
   });
 
-  const stepTimer = setInterval(() => {
+  const sendStep = (): void => {
     if (bridge?.stdin.destroyed || bridge?.stdin.writableEnded) {
-      clearInterval(stepTimer);
+      if (stepTimer) clearTimeout(stepTimer);
       return;
     }
     const safeCommand =
@@ -119,10 +144,20 @@ webSockets.on("connection", (webSocket) => {
         ? { ...command, pilot_elevator: 0, pilot_rudder: 0 }
         : command;
     bridge.stdin.write(`${JSON.stringify(safeCommand)}\n`);
-  }, stepPeriodMs);
+  };
+  const scheduleStep = (): void => {
+    if (stepTimer) clearTimeout(stepTimer);
+    nextStepAtMs += stepPeriodMs;
+    stepTimer = setTimeout(sendStep, Math.max(0, nextStepAtMs - performance.now()));
+  };
+  const startupTimer = setTimeout(() => {
+    sendJson(webSocket, { type: "error", message: "actual UF2 did not arm in rp2040js within 15 seconds" });
+    bridge?.kill();
+  }, 15_000);
 
   webSocket.on("close", () => {
-    clearInterval(stepTimer);
+    if (stepTimer) clearTimeout(stepTimer);
+    clearTimeout(startupTimer);
     lines.close();
     if (bridge && bridge.exitCode === null) {
       bridge.kill();
@@ -136,6 +171,10 @@ httpServer.listen(port, "127.0.0.1", () => {
 
 function isNormalized(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1;
+}
+
+function isInputKind(value: unknown): value is PilotCommand["elevator_input_kind"] {
+  return value === "analog" || value === "buttons";
 }
 
 function sendJson(webSocket: WebSocket, value: unknown): void {

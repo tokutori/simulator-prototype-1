@@ -31,6 +31,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .top-bar h1 { margin: 0.15rem 0 0; font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 500; letter-spacing: 0.02em; }
 .eyebrow { margin: 0; color: #e6a44c; font: 500 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.14em; }
 .status-cluster { display: flex; align-items: center; gap: 0.65rem; color: #b8cbc8; font-size: 0.78rem; }
+#mcu-performance { color: #d4e8e4; font: 0.68rem/1.2 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .mode-badge, .phase-badge { padding: 0.28rem 0.5rem; border: 1px solid rgba(142, 224, 203, 0.48); border-radius: 3px; font: 500 0.68rem/1 ui-monospace, monospace; }
 .mode-badge { color: #8ee0cb; }
 .phase-badge { color: #ffe4a8; border-color: rgba(230, 164, 76, 0.58); }
@@ -99,6 +100,7 @@ fieldset .checkbox { display: flex; }
 .key-binding.listening { border-color: #e6a44c; color: #e6a44c; }
 #gamepad-status, .settings-note { margin: 0.5rem 0; color: #829a96; font-size: 0.7rem; }
 .message { top: 5.3rem; right: 1rem; max-width: 24rem; padding: 0.6rem 0.75rem; color: #ffe4be; background: rgba(67, 35, 8, 0.9); border: 1px solid #e6a44c; border-radius: 4px; }
+.realtime-warning { top: 8.4rem; left: 50%; z-index: 8; transform: translateX(-50%); margin: 0; padding: 0.55rem 0.8rem; color: #fff1e8; background: rgba(116, 24, 16, 0.94); border: 1px solid #ff765c; font: 600 0.78rem/1.2 ui-monospace, monospace; letter-spacing: 0.04em; }
 .shortcut-help { right: 1.25rem; bottom: 0.2rem; margin: 0; color: rgba(222, 239, 236, 0.55); font: 0.62rem/1 ui-monospace, monospace; pointer-events: none; }
 
 @media (max-width: 760px) {

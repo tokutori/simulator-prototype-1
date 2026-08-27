@@ -4,6 +4,7 @@
 
 ```text
 fbw-control-core <------ sim-cli host controller
+fbw-input-core ----------> fbw-rp2040 UF2
        ^
        |       fbw-safety-core
        |              ^
@@ -32,14 +33,19 @@ Three.jsはhost visualization adapterであり、dependency directionへphysics�
 
 ```text
 sim-cli CSV -----------------------> replay parser ----> Three.js cameras/HUD
-browser pilot input -> local server -> interactive-bridge -> servo -> Rust FDM
-                                      ^
-                                      +-- shared longitudinal FBW core
+browser pilot input -> WebSocket -> virtual ADC/GPIO -> rp2040js(actual UF2)
+                                                    -> PWM0A/PWM0B -> servo -> Rust FDM
 ```
 
-browser入力は正規化pilot demandだけを送る。manual/automaticのauthority blend、model舵角
-saturation、servo dynamics、6DoF stepはRust側に置く。描画frame補間とchase-camera smoothingは
+browser入力は正規化pilot demandとanalog/buttonの種別だけを送る。manual/automaticのauthority
+blend、sensor処理、control、PWM生成はactual RP2040 UF2で行う。servo dynamicsと6DoF stepは
+Rust plant側に置く。描画frame補間とchase-camera smoothingは
 visual-onlyであり、plant stateやcontroller telemetryへfeedbackしない。
+
+Web appの実行状態は[The Elm Architecture](https://guide.elm-lang.org/architecture/)に従う判別可能unionの`AppState`をsingle source of
+truthとする。`update(AppState, AppMsg) -> (AppState, Effect)`は純粋で、WebSocket接続などを
+`Effect`として外へ返す。Three.js/DOMは`present(AppState)`のadapterであり、
+`mcu-running`なのにactual-UF2 backend情報がない状態を構築しない。
 
 ```text
 Rust plant observation

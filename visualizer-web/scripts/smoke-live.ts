@@ -17,6 +17,10 @@ if (!analysisResponse.ok || !(await analysisResponse.text()).includes("Birdman F
 const socket = new WebSocket(baseUrl.replace(/^http/, "ws") + "/live");
 let observations = 0;
 let previousTime = -1;
+let maximumProcessingMs = 0;
+let maximumLagMs = Number.NEGATIVE_INFINITY;
+let minimumRealTimeRatio = Number.POSITIVE_INFINITY;
+let nonRealtimeSamples = 0;
 const timeout = setTimeout(() => {
   socket.close();
   throw new Error("live smoke test timed out");
@@ -24,7 +28,8 @@ const timeout = setTimeout(() => {
 
 await new Promise<void>((resolve, reject) => {
   socket.on("open", () => {
-    socket.send(JSON.stringify({ pilot_elevator: 0.3, pilot_rudder: -0.4, autonomy: 0 }));
+    socket.send(JSON.stringify({ pilot_elevator: 0.3, pilot_rudder: -0.4, autonomy: 0,
+      elevator_input_kind: "analog", rudder_input_kind: "analog" }));
   });
   socket.on("message", (data) => {
     try {
@@ -37,14 +42,22 @@ await new Promise<void>((resolve, reject) => {
       finite(value.yaw_rad, "yaw_rad");
       finite(value.mixed_elevator_command_rad, "mixed_elevator_command_rad");
       finite(value.mixed_rudder_command_rad, "mixed_rudder_command_rad");
+      if (value.backend !== "rp2040js-actual-uf2") throw new Error("interactive backend is not actual UF2 in rp2040js");
+      const emulation = value.emulation as Record<string, unknown>;
+      maximumProcessingMs = Math.max(maximumProcessingMs, finite(emulation.processing_average_ms, "processing_average_ms"));
+      minimumRealTimeRatio = Math.min(minimumRealTimeRatio, finite(emulation.real_time_ratio, "real_time_ratio"));
+      maximumLagMs = Math.max(maximumLagMs, finite(emulation.lag_ms, "lag_ms"));
+      if (emulation.real_time !== true) nonRealtimeSamples += 1;
       if (time < previousTime) throw new Error("live time moved backwards");
       previousTime = time;
       observations += 1;
-      if (observations === 12) {
-        socket.send(JSON.stringify({ pilot_elevator: -0.2, pilot_rudder: 0.25, autonomy: 0.5 }));
-      } else if (observations === 24) {
-        socket.send(JSON.stringify({ pilot_elevator: 1, pilot_rudder: 1, autonomy: 1 }));
-      } else if (observations >= 36) {
+      if (observations === 20) {
+        socket.send(JSON.stringify({ pilot_elevator: -0.2, pilot_rudder: 0.25, autonomy: 0.5,
+          elevator_input_kind: "buttons", rudder_input_kind: "buttons" }));
+      } else if (observations === 40) {
+        socket.send(JSON.stringify({ pilot_elevator: 1, pilot_rudder: 1, autonomy: 1,
+          elevator_input_kind: "analog", rudder_input_kind: "analog" }));
+      } else if (observations >= 80) {
         resolve();
         socket.close();
       }
@@ -57,7 +70,11 @@ await new Promise<void>((resolve, reject) => {
 });
 
 clearTimeout(timeout);
-process.stdout.write(`Validated HTTP replay, analysis page, and ${observations} live observations\n`);
+process.stdout.write(
+  `Validated actual-UF2 HTTP/WebSocket: ${observations} observations, ` +
+  `max avg ${maximumProcessingMs.toFixed(2)} ms/update, max lag ${maximumLagMs.toFixed(1)} ms, ` +
+  `min ${minimumRealTimeRatio.toFixed(2)}x real-time, non-realtime samples ${nonRealtimeSamples}\n`,
+);
 
 function finite(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {

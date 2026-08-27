@@ -87,6 +87,7 @@ cargo run -p sim-cli -- --duration 5 --dt 0.01
 ```powershell
 cd visualizer-web
 npm.cmd install
+npm.cmd install --prefix ..\virtual-platform
 npm.cmd run sample
 npm.cmd run dev
 ```
@@ -146,8 +147,10 @@ virtual plant -> virtual sensor/peripheral -> actual target firmware
 同じRust physics coreを一stepずつ進める。
 
 interactive viewerのlive modeもRust FDMを使用するが、pilot input hardwareが未選定のため
-host adapterである。actual UF2 pathと混同しない。production UF2の結果は既存virtual
-platform CSVを同じviewerへ読み込んで可視化できる。
+browserのkeyboard/gamepadをvirtual ADC/GPIOへ割り当てる。control/sensor/mixing/PWMは
+production UF2をrp2040jsで実行し、host controllerへfallbackしない。host側はRust servo/FDM
+plantだけを担当する。Web UIはTEAの判別可能unionでbackend状態を管理し、rp2040jsがwall-clockへ
+追従できない場合は画面に明示する。
 
 ## 開発方針との対応
 

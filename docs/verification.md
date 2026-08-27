@@ -209,7 +209,8 @@ virtual deviceは32 Hzでbitを生成してpressure 3 byte readでclearし、fir
 | AS5600 magnet 3 update | 1 | 2 update差 | 19 update差 | 0 m | +0.0116 m |
 | DPS ready 3 update | 1 | 2 update差 | 19 update差 | 0 m | +0.0116 m |
 
-差分は「3回目」「20回目」を表す。状態遷移はGPIO17～19でfirmware control updateに同期して
+差分は「3回目」「20回目」を表す。状態遷移はGPIO21（safety）、GPIO18（invalid）、
+GPIO19（control update）でfirmware control updateに同期して
 観測した。固定舵はこの仮モデルで小さい高度差に留まっただけで、安全証明ではない。
 比較graphは`reports/fault-injection.png`。
 

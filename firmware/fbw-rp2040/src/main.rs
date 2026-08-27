@@ -7,7 +7,7 @@ use core::f32::consts::PI;
 use cortex_m_rt::entry;
 use embedded_hal::{delay::DelayNs, digital::{InputPin, OutputPin}, pwm::SetDutyCycle};
 use fbw_control_core::{ControllerInput, ControllerState};
-use fbw_input_core::{RawPilotInput, blend, decode};
+use fbw_input_core::{ButtonPair, RawPilotInput, blend, decode};
 use fbw_safety_core::{SafetyConfig, SafetyMode, SafetyState};
 use fugit::RateExtU32;
 use panic_halt as _;
@@ -167,10 +167,14 @@ fn main() -> ! {
             elevator_adc: adc.read(&mut elevator_axis).unwrap_or(2048),
             rudder_adc: adc.read(&mut rudder_axis).unwrap_or(2048),
             authority_adc: adc.read(&mut authority_axis).unwrap_or(4095),
-            elevator_negative: elevator_negative.is_low().unwrap_or(false),
-            elevator_positive: elevator_positive.is_low().unwrap_or(false),
-            rudder_negative: rudder_negative.is_low().unwrap_or(false),
-            rudder_positive: rudder_positive.is_low().unwrap_or(false),
+            elevator_buttons: ButtonPair::from_pressed(
+                elevator_negative.is_low().unwrap_or(false),
+                elevator_positive.is_low().unwrap_or(false),
+            ),
+            rudder_buttons: ButtonPair::from_pressed(
+                rudder_negative.is_low().unwrap_or(false),
+                rudder_positive.is_low().unwrap_or(false),
+            ),
         });
         let elevator_command = blend(
             pilot.elevator * SURFACE_LIMIT_RAD,

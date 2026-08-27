@@ -20,6 +20,14 @@ import {
 
 import "./style.css";
 import { analysisStorageKey, prepareAnalysisDataset } from "./analysis-data.ts";
+import {
+  isInteractive,
+  present,
+  update as updateApp,
+  type AppMsg,
+  type AppState,
+  type Effect,
+} from "./app-state.ts";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
 import { createDistanceRings } from "./distance-rings.ts";
@@ -34,7 +42,6 @@ import {
 import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
-  AppMode,
   CameraMode,
   FlightFrame,
   InteractiveObservation,
@@ -59,7 +66,7 @@ const aircraft = createAircraft();
 scene.add(aircraft.root);
 const environment = buildEnvironment(scene);
 
-let mode: AppMode = "replay";
+let appState: AppState = { tag: "replay", sourceName: "sample-flight.csv" };
 let cameraMode: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
@@ -93,13 +100,15 @@ function animate(nowMs: number): void {
     ? `Gamepad ${gamepad.index}: ${gamepad.id}`
     : "No gamepad detected";
 
-  if (mode === "live") {
+  if (isInteractive(appState)) {
     pilotInput.update(deltaS, gamepad);
     if (socket?.readyState === WebSocket.OPEN && nowMs - lastCommandSentMs >= 40) {
       const command: PilotCommandMessage = {
         pilot_elevator: pilotInput.elevator,
         pilot_rudder: pilotInput.rudder,
         autonomy: Number(element<HTMLInputElement>("autonomy").value) / 100,
+        elevator_input_kind: settings.elevator.source === "gamepad-axis" ? "analog" : "buttons",
+        rudder_input_kind: settings.rudder.source === "gamepad-axis" ? "analog" : "buttons",
       };
       socket.send(JSON.stringify(command));
       lastCommandSentMs = nowMs;
@@ -107,7 +116,7 @@ function animate(nowMs: number): void {
   }
 
   let frame: FlightFrame | undefined;
-  if (mode === "replay" && replayFrames.length > 0) {
+  if (!isInteractive(appState) && replayFrames.length > 0) {
     const last = replayFrames.at(-1);
     if (replayPlaying && last) {
       playbackTimeS = Math.min(last.timeS, playbackTimeS + deltaS * playbackSpeed);
@@ -118,7 +127,7 @@ function animate(nowMs: number): void {
     }
     frame = interpolateFrame(replayFrames, playbackTimeS);
     updateTimeline();
-  } else if (mode === "live") {
+  } else if (isInteractive(appState)) {
     frame = liveFrame;
   }
 
@@ -231,7 +240,7 @@ function bindControls(): void {
   element<HTMLButtonElement>("chase-camera").addEventListener("click", () => setCameraMode("chase"));
   element<HTMLButtonElement>("replay-mode").addEventListener("click", () => setMode("replay"));
   element<HTMLButtonElement>("live-mode").addEventListener("click", () => setMode("live"));
-  element<HTMLButtonElement>("restart-live").addEventListener("click", connectLive);
+  element<HTMLButtonElement>("restart-live").addEventListener("click", () => dispatch({ type: "request-mcu" }));
   element<HTMLButtonElement>("open-analysis").addEventListener("click", openCurrentAnalysis);
   element<HTMLButtonElement>("flight-event-analysis").addEventListener("click", openCurrentAnalysis);
   element<HTMLButtonElement>("play-pause").addEventListener("click", () => {
@@ -295,7 +304,7 @@ function bindControls(): void {
       } else if (
         !isControlCode(event.code) &&
         event.code === "Space" &&
-        mode === "replay" &&
+        !isInteractive(appState) &&
         !event.repeat
       ) {
         event.preventDefault();
@@ -350,9 +359,8 @@ function loadReplay(frames: FlightFrame[], name: string): void {
   replayPlaying = true;
   updatePlayButton();
   buildTrajectory(frames);
-  element("connection-status").textContent = name;
   element<HTMLButtonElement>("open-analysis").disabled = frames.length < 2;
-  setMode("replay");
+  dispatch({ type: "select-replay", sourceName: name });
   hideMessage();
 }
 
@@ -371,20 +379,40 @@ function buildTrajectory(frames: readonly FlightFrame[]): void {
   scene.add(trajectory);
 }
 
-function setMode(next: AppMode): void {
-  mode = next;
-  element<HTMLButtonElement>("replay-mode").classList.toggle("active", next === "replay");
-  element<HTMLButtonElement>("live-mode").classList.toggle("active", next === "live");
-  element("replay-controls").toggleAttribute("hidden", next !== "replay");
-  element("live-controls").toggleAttribute("hidden", next !== "live");
-  element("restart-live").toggleAttribute("hidden", next !== "live");
-  element("mode-badge").textContent = next.toUpperCase();
-  if (trajectory) trajectory.visible = next === "replay" && cameraMode === "chase";
-  if (next === "live") {
-    connectLive();
-  } else {
-    disconnectLive();
-    element("connection-status").textContent = "sample / loaded replay";
+function setMode(next: "replay" | "live"): void {
+  if (next === "live") dispatch({ type: "request-mcu" });
+  else dispatch({ type: "select-replay", sourceName: replayName });
+}
+
+function dispatch(message: AppMsg): void {
+  const [next, effect] = updateApp(appState, message);
+  appState = next;
+  renderAppState();
+  runEffect(effect);
+}
+
+function renderAppState(): void {
+  const interactive = isInteractive(appState);
+  const presentation = present(appState);
+  element<HTMLButtonElement>("replay-mode").classList.toggle("active", !interactive);
+  element<HTMLButtonElement>("live-mode").classList.toggle("active", interactive);
+  element("replay-controls").toggleAttribute("hidden", interactive);
+  element("live-controls").toggleAttribute("hidden", !interactive);
+  element("restart-live").toggleAttribute("hidden", !interactive);
+  element("mode-badge").textContent = presentation.mode;
+  element("connection-status").textContent = presentation.status;
+  element("mcu-performance").textContent = presentation.performance;
+  const warning = element("realtime-warning");
+  warning.textContent = presentation.warning ?? "";
+  warning.hidden = presentation.warning === undefined;
+  if (trajectory) trajectory.visible = !interactive && cameraMode === "chase";
+}
+
+function runEffect(effect: Effect): void {
+  switch (effect.type) {
+    case "none": break;
+    case "connect-mcu": connectLive(); break;
+    case "disconnect-mcu": disconnectLive(); break;
   }
 }
 
@@ -395,23 +423,38 @@ function connectLive(): void {
   pilotInput.clear();
   element<HTMLButtonElement>("download-live").disabled = true;
   element<HTMLButtonElement>("open-analysis").disabled = true;
-  element("connection-status").textContent = "connecting…";
-  setFlightEvent("SYSTEM READY", "READY", "Waiting for the first RP2040-independent host FDM sample");
+  setFlightEvent("ACTUAL UF2", "MCU START", "Loading production RP2040 firmware in rp2040js");
   setPhaseBadge("ready");
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${protocol}//${location.host}/live`);
   socket.addEventListener("open", () => {
-    element("connection-status").textContent = "live Rust FDM";
     hideMessage();
   });
   socket.addEventListener("message", (event) => {
     try {
       const message = JSON.parse(String(event.data)) as InteractiveObservation | { type: string; message: string };
       if ("type" in message) {
-        element("connection-status").textContent = message.type === "ended" ? "surface contact" : "bridge error";
-        if (message.type === "error") showMessage(message.message);
+        dispatch(message.type === "ended"
+          ? { type: "mcu-ended", reason: message.message }
+          : { type: "mcu-failed", error: message.message });
         return;
       }
+      if (message.backend !== "rp2040js-actual-uf2") {
+        dispatch({ type: "mcu-failed", error: "Rejected telemetry that did not come from actual RP2040 UF2" });
+        return;
+      }
+      dispatch({
+        type: "mcu-telemetry",
+        performance: {
+          processingMs: message.emulation.processing_ms,
+          processingAverageMs: message.emulation.processing_average_ms,
+          realTimeRatio: message.emulation.real_time_ratio,
+          lagMs: message.emulation.lag_ms,
+          deadlineMissed: message.emulation.deadline_missed,
+          realTime: message.emulation.real_time,
+          timingValidated: false,
+        },
+      });
       liveFrame = frameFromLive(message);
       liveFrames.push(liveFrame);
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
@@ -422,11 +465,14 @@ function connectLive(): void {
   });
   socket.addEventListener("close", () => {
     pilotInput.clear();
-    if (mode === "live" && element("connection-status").textContent === "live Rust FDM") {
-      element("connection-status").textContent = "disconnected";
+    if (isInteractive(appState) && appState.tag !== "mcu-ended" && appState.tag !== "mcu-failed") {
+      dispatch({ type: "mcu-failed", error: "actual-UF2 bridge disconnected" });
     }
   });
-  socket.addEventListener("error", () => showMessage("Interactive server is unavailable. Run npm run dev."));
+  socket.addEventListener("error", () => dispatch({
+    type: "mcu-failed",
+    error: "Interactive actual-UF2 server is unavailable. Run npm run dev.",
+  }));
 }
 
 function disconnectLive(): void {
@@ -442,7 +488,7 @@ function setCameraMode(next: CameraMode): void {
   chaseInitialized = false;
   element<HTMLButtonElement>("cockpit-camera").setAttribute("aria-pressed", String(next === "cockpit"));
   element<HTMLButtonElement>("chase-camera").setAttribute("aria-pressed", String(next === "chase"));
-  if (trajectory) trajectory.visible = mode === "replay" && next === "chase";
+  if (trajectory) trajectory.visible = !isInteractive(appState) && next === "chase";
 }
 
 function updateHud(frame: FlightFrame): void {
@@ -451,7 +497,7 @@ function updateHud(frame: FlightFrame): void {
   value("gamma-value", frame.flightPathRad * radiansToDegrees, 1);
   value("alpha-value", frame.alphaRad * radiansToDegrees, 1);
   value("roll-value", frame.rollRad * radiansToDegrees, 1);
-  const frames = mode === "live" ? liveFrames : replayFrames;
+  const frames = isInteractive(appState) ? liveFrames : replayFrames;
   const elapsedS = frame.timeS - (frames[0]?.timeS ?? frame.timeS);
   element("time-value").textContent = formatFlightTime(elapsedS);
   const elevatorDeg = frame.elevatorRad * radiansToDegrees;
@@ -461,16 +507,16 @@ function updateHud(frame: FlightFrame): void {
   setSurfaceTrack("elevator-track", elevatorDeg, frame.mixedElevatorCommandRad * radiansToDegrees);
   setSurfaceTrack("rudder-track", rudderDeg, frame.mixedRudderCommandRad * radiansToDegrees);
   element("altitude-instrument").classList.toggle("caution", frame.altitudeM < 2 && !frame.surfaceContact);
-  element<HTMLMeterElement>("pilot-elevator-meter").value = mode === "live" ? pilotInput.elevator : frame.pilotElevator;
-  element<HTMLMeterElement>("pilot-rudder-meter").value = mode === "live" ? pilotInput.rudder : frame.pilotRudder;
+  element<HTMLMeterElement>("pilot-elevator-meter").value = isInteractive(appState) ? pilotInput.elevator : frame.pilotElevator;
+  element<HTMLMeterElement>("pilot-rudder-meter").value = isInteractive(appState) ? pilotInput.rudder : frame.pilotRudder;
 }
 
 function updateFlightPhase(frame: FlightFrame): void {
-  const frames = mode === "live" ? liveFrames : replayFrames;
+  const frames = isInteractive(appState) ? liveFrames : replayFrames;
   const first = frames[0] ?? frame;
   const last = frames.at(-1) ?? frame;
   const elapsedS = Math.max(0, frame.timeS - first.timeS);
-  const replayAtEnd = mode === "replay"
+  const replayAtEnd = !isInteractive(appState)
     && !replayPlaying
     && Math.abs(frame.timeS - last.timeS) < 1e-6;
   const phase = classifyFlightPhase({
@@ -519,9 +565,9 @@ function setFlightEvent(kicker: string, title: string, detail: string, actionLab
 }
 
 function openCurrentAnalysis(): void {
-  const frames = mode === "live" ? liveFrames : replayFrames;
+  const frames = isInteractive(appState) ? liveFrames : replayFrames;
   if (frames.length < 2) return;
-  const name = mode === "live" ? "interactive flight" : replayName;
+  const name = isInteractive(appState) ? "interactive actual-UF2 flight" : replayName;
   try {
     localStorage.setItem(analysisStorageKey, JSON.stringify(prepareAnalysisDataset(name, frames)));
     window.open("/analysis.html", "_blank", "noopener");

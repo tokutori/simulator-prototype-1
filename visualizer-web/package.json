@@ -5,12 +5,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build:bridge": "cargo build -p sim-cli --bin interactive-bridge",
+    "build:platform": "tsx scripts/build-platform.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test src/*.test.ts",
     "sample": "tsx scripts/build-sample.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
-    "dev": "npm run build:bridge && tsx server.ts",
+    "dev": "npm run build:platform && tsx server.ts",
     "build": "vite build",
     "preview": "vite preview"
   },

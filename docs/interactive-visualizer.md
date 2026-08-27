@@ -14,7 +14,8 @@ npm.cmd run sample
 npm.cmd run dev
 ```
 
-`http://127.0.0.1:4173/`を開く。`npm run dev`はRustの`interactive-bridge`もbuildする。
+先に`../virtual-platform`でも`npm.cmd install`を行う。`http://127.0.0.1:4173/`を開く。
+`npm run dev`はRust `plant-bridge`、production RP2040 ELF/UF2もbuildする。
 production buildだけを確認する場合は`npm.cmd run build`を使う。静的な`dist`だけでは
 local Rust processを起動できないため、interactive modeには`server.ts`が必要である。
 
@@ -66,8 +67,8 @@ keyは画面のbinding buttonを選んで次のkeyを押す。gamepadはaxis/but
 dead zone、response exponentを変更できる。elevatorをbutton、rudderをstickとする混在も
 可能で、設定はbrowser local storageへ保存する。
 
-button入力は瞬時の0/100舵角にしない。押下中に`buttonRisePerSecond`で要求を増やし、
-解放時は`buttonReturnPerSecond`でneutralへ戻す。反対button同時押し、window focus喪失、
+browser側のbutton表示値は`buttonRisePerSecond`で増減するが、actual-UF2 testではGPIO buttonを
+active-lowの離散入力として渡すため、押下判定後はfull demandになる。反対button同時押し、window focus喪失、
 gamepad disconnectではneutralとする。local serverも250 ms command timeout時にpilot要求を
 neutralへ戻す。ただしbrowser/OSの入力処理は実機cockpit hardwareのvalidationではない。
 
@@ -77,7 +78,8 @@ keyboard/gamepad比較だけでは決めない。
 
 ## Manual / shared / automatic
 
-`Auto authority`を0～100%で連続変更する。Rust側で舵ごとに次を計算する。
+`Auto authority`を0～100%で連続変更する。Web値はGPIO28/ADC2の12-bit countへ変換され、
+actual RP2040 firmwareが舵ごとに次を計算する。
 
 ```text
 mixed = (1 - autonomy) * manual + autonomy * automatic
@@ -107,16 +109,22 @@ neutral入力を30秒与えたdeterministic smoke runは次の通りだった。
 controller safetyの実機妥当性を示さない。pilot skill比較には入力trajectoryを保存して
 反復し、実flight logでmodelを更新する必要がある。
 
-## MCU boundary
+## MCU boundary and performance warning
 
-interactive live modeはhost Rust controller/FDMを動かす。縦制御algorithmはactual UF2と
-同じcoreだが、現在の実機firmwareにはpilot input peripheralとrudder PWMがないため、
-この経路をproduction-binary SILとは呼ばない。
+interactive live modeはproduction UF2をrp2040jsへloadする。browser入力はvirtual ADC/GPIO、
+BNO055/AS5600/SDP810/DPS310はvirtual I2C、出力はPWM0A/Bを必ず通る。host controllerへの
+fallbackはない。Rust hostに残るのはservo/aircraft plantであり、制御演算ではない。
 
-actual UF2を使う既存`virtual-platform`のCSVはviewerでreplayできる。次段階は実機入力
-hardwareを決め、virtual ADC/PWM/I2C inputとrudder outputを追加して、production UF2の
-pilot-in-the-loopを閉じることである。これは`embedded-rust-playground`から引き継いだ
-「実firmwareのMMIOをvirtual peripheralが受ける」境界を維持して行う。
+画面上部はbackendを`INTERACTIVE / RP2040JS`、`actual RP2040 UF2`と明示し、実時間倍率、
+平均処理ms/update、累積lag、deadline missを表示する。平均処理が10 ms/updateを超える、
+累積lagが100 msを超える、実時間倍率が0.9未満になる、またはfirmware deadline missを観測した場合は
+`MCU EMULATION TOO SLOW — NOT REAL-TIME`を常時表示する。host controllerへ切り替えない。
+実時間倍率だけは起動直後の1 sampleに過敏にならないよう、最初の0.5秒をsettling windowとする。
+ただしrp2040jsのcycle timingはvalidation済みではなく、画面上のreal-timeはwall-clockへ
+追従できるという意味だけである。
+
+実行状態はThe Elm Architectureの`Model/Msg/update/view/Effect`へ分け、判別可能unionで
+Replay、MCU接続中、実時間、性能不足、終了、失敗を表す。
 
 ## Verification
 

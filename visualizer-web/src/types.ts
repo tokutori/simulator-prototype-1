@@ -46,13 +46,24 @@ export interface InteractiveObservation {
   mixed_elevator_command_rad: number;
   mixed_rudder_command_rad: number;
   surface_contact: boolean;
+  backend: "rp2040js-actual-uf2";
+  emulation: {
+    processing_ms: number;
+    processing_average_ms: number;
+    real_time_ratio: number;
+    lag_ms: number;
+    deadline_missed: boolean;
+    real_time: boolean;
+    timing_validated: false;
+  };
 }
 
 export interface PilotCommandMessage {
   pilot_elevator: number;
   pilot_rudder: number;
   autonomy: number;
+  elevator_input_kind: "analog" | "buttons";
+  rudder_input_kind: "analog" | "buttons";
 }
 
 export type CameraMode = "cockpit" | "chase";
-export type AppMode = "replay" | "live";

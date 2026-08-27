@@ -81,7 +81,7 @@ hostとのaltitude RMSE 0.0290 m、flight-path RMSE 0.0513 deg、actual elevator
 `+0.75 deg`を使う。復帰には20連続validを要求し、controller stateもclean startする。
 ただしこれはpitch/AoA/barometric altitudeを作れないcontrol-critical faultに適用する。
 SDP810だけのfaultでは最後のvalid airspeedを保持し、残るIMU/AoA/barometerで制御を継続する。
-GPIO17はarming/failsafe、GPIO18はdegradedを含むraw invalid、GPIO19はcontrol updateを示す。
+GPIO21はarming/failsafe、GPIO18はdegradedを含むraw invalid、GPIO19はcontrol updateを示す。
 
 SDP CRC/NACKを1または3 update壊すとGPIO18は異常を示すがfailsafeは0で、再浮上も0だった。
 BNO status、AS5600 magnet、DPS readyを3 update壊すとfailsafe 1回、`invalid→failsafe`は

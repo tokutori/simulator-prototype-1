@@ -39,6 +39,8 @@ datasheetを区別して追跡します。実機挙動、飛距離、stall safet
 - BNO055、AS5600、SDP810、DPS310のdatasheet-level register protocolとSDP CRC
 - status/CRC/I²C NACKの決定的fault injectionとactual-UF2永続故障sweep
 - SDP810単独喪失時のheld-airspeed、相対気圧高度pull-outを使うdegraded controlと17 model stress比較
+- Three.jsによる一人称/追従三人称replay、HUD、CSV読込み
+- keyboard/gamepadの設定可能なelevator/rudder入力とmanual/shared/auto連続authority比較
 
 ## 実行
 
@@ -78,6 +80,20 @@ CSVを標準出力へ出す場合:
 cargo run -p sim-cli -- --duration 5 --dt 0.01
 ```
 
+一人称/三人称viewerとinteractive pilot-in-the-loop:
+
+```powershell
+cd visualizer-web
+npm.cmd install
+npm.cmd run sample
+npm.cmd run dev
+```
+
+`http://127.0.0.1:4173/`を開く。defaultはreplay、`Interactive`でRust FDMとのlive
+loopへ移る。keyboard 4 key、gamepad stick、gamepad buttonをelevator/rudderごとに
+選択でき、Auto authorityを0～100%で変更できる。詳細と制約は
+[interactive visualizer](docs/interactive-visualizer.md)を参照する。
+
 ## 構成
 
 ```text
@@ -88,6 +104,7 @@ crates/
   sim-cli/               JSON、CLI、CSVというhost adapter
 firmware/fbw-rp2040/      実target向けno_std firmware
 virtual-platform/         rp2040js、virtual I2C devices、Rust plant bridge
+visualizer-web/           Three.js replay、interactive input、local Rust bridge server
 models/
   model-contract.schema.json
   qx18-public-reconstruction.json 出典付きの-5～8 deg strict model
@@ -98,6 +115,7 @@ docs/
   qx18-and-avionics-model.md
   verification.md
   flight-validation.md
+  interactive-visualizer.md
   roadmap.md
 ```
 
@@ -117,6 +135,10 @@ virtual plant -> virtual sensor/peripheral -> actual target firmware
 `rp2040-hal`がI²C0とPWM0のMMIOを操作し、`rp2040js`がBNO055、AS5600、SDP810、DPS310
 互換transactionを受ける。FDMはTypeScriptへ移植せず、NDJSONの`plant-bridge`を介して
 同じRust physics coreを一stepずつ進める。
+
+interactive viewerのlive modeもRust FDMを使用するが、pilot input hardwareが未選定のため
+host adapterである。actual UF2 pathと混同しない。production UF2の結果は既存virtual
+platform CSVを同じviewerへ読み込んで可視化できる。
 
 ## 開発方針との対応
 

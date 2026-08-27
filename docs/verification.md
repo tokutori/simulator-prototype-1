@@ -298,4 +298,12 @@ npm.cmd run simulate --prefix virtual-platform -- --steps 2000 --timing-accelera
 & .\.eval-venv\Scripts\python.exe evaluation\virtual_platform_compare.py --host reports\native-shared-controller.csv --virtual reports\virtual-platform.csv --plot reports\virtual-platform-comparison.png --summary reports\virtual-platform-summary.json
 npm.cmd run simulate --prefix virtual-platform -- --steps 700 --sensor-fault sdp-crc --fault-start-s 3 --fault-duration-s 0 --fault-update-count 3 --output reports\fault-update-sdp-three.csv --summary reports\fault-update-sdp-three.json
 & .\.eval-venv\Scripts\python.exe evaluation\fault_injection_plot.py --reports reports --plot reports\fault-injection.png
+cd visualizer-web
+npm.cmd install
+npm.cmd run sample
+npm.cmd run check
+npm.cmd test
+npm.cmd run build
+# npm.cmd run devを別terminalで起動後
+npm.cmd run smoke:live
 ```

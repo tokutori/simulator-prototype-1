@@ -34,7 +34,9 @@ impl ReferenceControllerState {
 }
 
 #[allow(clippy::cast_possible_truncation)] // Model JSON is adapted to the RP2040's f32 controller.
-pub(crate) fn controller_config(file: &ReferenceControllerFile) -> ControllerConfig {
+/// Converts the machine-readable model controller section to the shared MCU-width config.
+#[must_use]
+pub fn controller_config(file: &ReferenceControllerFile) -> ControllerConfig {
     ControllerConfig {
         pull_out_start_airspeed_mps: file.pull_out_start_airspeed_mps as f32,
         pull_out_full_airspeed_mps: file.pull_out_full_airspeed_mps as f32,

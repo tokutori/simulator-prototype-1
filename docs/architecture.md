@@ -27,6 +27,20 @@ adapterはsensor別のcriticalityを決める。SDP810単独faultでは最後の
 raw-invalid診断を立てたまま他のsensorで制御を継続する。BNO055/AS5600/DPS310 faultは
 control-criticalとしてsafety gateへ`None`を渡す。
 
+Three.jsはhost visualization adapterであり、dependency directionへphysicsの逆流を
+作らない。
+
+```text
+sim-cli CSV -----------------------> replay parser ----> Three.js cameras/HUD
+browser pilot input -> local server -> interactive-bridge -> servo -> Rust FDM
+                                      ^
+                                      +-- shared longitudinal FBW core
+```
+
+browser入力は正規化pilot demandだけを送る。manual/automaticのauthority blend、model舵角
+saturation、servo dynamics、6DoF stepはRust側に置く。描画frame補間とchase-camera smoothingは
+visual-onlyであり、plant stateやcontroller telemetryへfeedbackしない。
+
 ```text
 Rust plant observation
   -> BNO055/AS5600/SDP810/DPS310 register encoding

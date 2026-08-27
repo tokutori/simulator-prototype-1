@@ -8,4 +8,5 @@
 )] // The schema structs mirror documented JSON fields verbatim.
 pub mod config;
 pub mod controller;
+pub mod interactive;
 pub mod session;

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="鳥人間滑空機用Rust FDMの一人称・三人称visualizer" />
+    <title>Birdman Flight Visualizer</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="flight-view" aria-label="鳥人間滑空機の3D飛行表示"></canvas>
+
+      <header class="top-bar">
+        <div>
+          <p class="eyebrow">SIMULATOR1 / TRAINING-ONLY</p>
+          <h1>Birdman Flight Visualizer</h1>
+        </div>
+        <div class="status-cluster">
+          <span id="mode-badge" class="mode-badge">REPLAY</span>
+          <span id="connection-status" role="status">sample flight</span>
+        </div>
+      </header>
+
+      <section id="hud" class="hud" aria-label="Flight telemetry">
+        <div class="readout primary-readout">
+          <span>IAS</span><strong id="airspeed-value">--</strong><small>m/s</small>
+        </div>
+        <div class="readout primary-readout">
+          <span>ALT</span><strong id="altitude-value">--</strong><small>m</small>
+        </div>
+        <div class="readout"><span>γ</span><strong id="gamma-value">--</strong><small>deg</small></div>
+        <div class="readout"><span>α</span><strong id="alpha-value">--</strong><small>deg</small></div>
+        <div class="readout"><span>ROLL</span><strong id="roll-value">--</strong><small>deg</small></div>
+        <div class="readout"><span>TIME</span><strong id="time-value">--</strong><small>s</small></div>
+        <div class="command-readout">
+          <div><span>PILOT ELEV</span><meter id="pilot-elevator-meter" min="-1" max="1" value="0"></meter></div>
+          <div><span>PILOT RUDD</span><meter id="pilot-rudder-meter" min="-1" max="1" value="0"></meter></div>
+          <div><span>ACTUAL ELEV</span><strong id="elevator-value">-- deg</strong></div>
+          <div><span>ACTUAL RUDD</span><strong id="rudder-value">-- deg</strong></div>
+        </div>
+      </section>
+
+      <section class="camera-controls" aria-label="Camera controls">
+        <button id="cockpit-camera" type="button" aria-pressed="false">Cockpit</button>
+        <button id="chase-camera" type="button" aria-pressed="true">Chase</button>
+      </section>
+
+      <section class="bottom-panel" aria-label="Simulation controls">
+        <div class="mode-controls">
+          <button id="replay-mode" type="button" class="active">Replay</button>
+          <button id="live-mode" type="button">Interactive</button>
+          <button id="restart-live" type="button" hidden>Restart flight</button>
+        </div>
+
+        <div id="replay-controls" class="replay-controls">
+          <button id="play-pause" type="button" aria-label="Pause replay">Pause</button>
+          <input id="timeline" type="range" min="0" max="1" step="0.001" value="0" aria-label="Replay timeline" />
+          <select id="playback-speed" aria-label="Replay speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+          <label class="file-control">Load CSV<input id="csv-file" type="file" accept=".csv,text/csv" /></label>
+        </div>
+
+        <div id="live-controls" class="live-controls" hidden>
+          <label for="autonomy">Auto authority <strong id="autonomy-value">100%</strong></label>
+          <input id="autonomy" type="range" min="0" max="100" step="1" value="100" />
+          <span id="control-mode-label">FULL AUTO</span>
+          <button id="download-live" type="button" disabled>Download log</button>
+        </div>
+
+        <details id="input-settings">
+          <summary>Input settings</summary>
+          <div class="settings-grid">
+            <fieldset>
+              <legend>Elevator <small>positive = nose down</small></legend>
+              <label>Source<select id="elevator-source">
+                <option value="keyboard-buttons">Keyboard buttons</option>
+                <option value="gamepad-axis">Gamepad axis</option>
+                <option value="gamepad-buttons">Gamepad buttons</option>
+              </select></label>
+              <div class="binding-row"><span>Nose up</span><button type="button" id="elevator-negative-key" class="key-binding"></button></div>
+              <div class="binding-row"><span>Nose down</span><button type="button" id="elevator-positive-key" class="key-binding"></button></div>
+              <label>Gamepad axis<input id="elevator-axis" type="number" min="0" max="15" /></label>
+              <label>Up / down buttons<input id="elevator-buttons" type="text" inputmode="numeric" /></label>
+              <label class="checkbox"><input id="elevator-invert" type="checkbox" /> Invert</label>
+            </fieldset>
+            <fieldset>
+              <legend>Rudder <small>positive = yaw right</small></legend>
+              <label>Source<select id="rudder-source">
+                <option value="keyboard-buttons">Keyboard buttons</option>
+                <option value="gamepad-axis">Gamepad axis</option>
+                <option value="gamepad-buttons">Gamepad buttons</option>
+              </select></label>
+              <div class="binding-row"><span>Yaw left</span><button type="button" id="rudder-negative-key" class="key-binding"></button></div>
+              <div class="binding-row"><span>Yaw right</span><button type="button" id="rudder-positive-key" class="key-binding"></button></div>
+              <label>Gamepad axis<input id="rudder-axis" type="number" min="0" max="15" /></label>
+              <label>Left / right buttons<input id="rudder-buttons" type="text" inputmode="numeric" /></label>
+              <label class="checkbox"><input id="rudder-invert" type="checkbox" /> Invert</label>
+            </fieldset>
+            <fieldset>
+              <legend>Response</legend>
+              <label>Gamepad index<input id="gamepad-index" type="number" min="0" max="3" /></label>
+              <label>Dead zone<input id="dead-zone" type="number" min="0" max="0.5" step="0.01" /></label>
+              <label>Response exponent<input id="response-exponent" type="number" min="0.5" max="3" step="0.05" /></label>
+              <label>Button rise /s<input id="button-rise" type="number" min="0.1" max="10" step="0.1" /></label>
+              <label>Return to neutral /s<input id="button-return" type="number" min="0.1" max="10" step="0.1" /></label>
+              <p id="gamepad-status">No gamepad detected</p>
+              <button id="reset-input" type="button">Reset defaults</button>
+            </fieldset>
+          </div>
+          <p class="settings-note">反対button同時押し・focus喪失・disconnect・250 ms通信timeoutはpilot要求をneutralにします。</p>
+        </details>
+      </section>
+
+      <p id="message" class="message" role="alert" hidden></p>
+      <p class="shortcut-help">V camera · H HUD · Space replay · W/S elevator · A/D rudder</p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

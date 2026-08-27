@@ -14,20 +14,34 @@ pub struct PlantObservation {
     pub time_s: f64,
     /// North displacement from release.
     pub north_m: f64,
+    /// East displacement from release.
+    pub east_m: f64,
     /// Altitude above the water/reference surface.
     pub altitude_m: f64,
+    /// True roll attitude.
+    pub roll_rad: f64,
     /// True pitch attitude.
     pub pitch_rad: f64,
+    /// True yaw/heading attitude.
+    pub yaw_rad: f64,
     /// True flight-path angle.
     pub flight_path_rad: f64,
     /// Actual elevator deflection after servo dynamics.
     pub elevator_rad: f64,
     /// Actual rudder deflection after servo dynamics.
     pub rudder_rad: f64,
+    /// Virtual BNO055 roll output.
+    pub sensor_roll_rad: f64,
     /// Virtual BNO055 pitch output.
     pub sensor_pitch_rad: f64,
+    /// Virtual BNO055 yaw/heading output.
+    pub sensor_yaw_rad: f64,
+    /// Virtual BNO055 body roll-rate output.
+    pub sensor_roll_rate_rad_s: f64,
     /// Virtual BNO055 body pitch-rate output.
     pub sensor_pitch_rate_rad_s: f64,
+    /// Virtual BNO055 body yaw-rate output.
+    pub sensor_yaw_rate_rad_s: f64,
     /// Virtual SDP810-derived airspeed.
     pub sensor_airspeed_mps: f64,
     /// Virtual SDP810 differential pressure.
@@ -174,16 +188,24 @@ fn observation(
     sample: SensorSample,
     aero_in_range: bool,
 ) -> PlantObservation {
+    let euler = state.attitude_body_to_ned.to_euler();
     PlantObservation {
         time_s,
         north_m: state.position_ned_m.x,
+        east_m: state.position_ned_m.y,
         altitude_m: -state.position_ned_m.z,
-        pitch_rad: state.attitude_body_to_ned.to_euler().y,
+        roll_rad: euler.x,
+        pitch_rad: euler.y,
+        yaw_rad: euler.z,
         flight_path_rad: flight_path_angle_rad(state),
         elevator_rad: controls.elevator_rad,
         rudder_rad: controls.rudder_rad,
+        sensor_roll_rad: sample.roll_rad,
         sensor_pitch_rad: sample.pitch_rad,
+        sensor_yaw_rad: sample.yaw_rad,
+        sensor_roll_rate_rad_s: sample.gyro_rad_s.x,
         sensor_pitch_rate_rad_s: sample.gyro_rad_s.y,
+        sensor_yaw_rate_rad_s: sample.gyro_rad_s.z,
         sensor_airspeed_mps: sample.airspeed_mps,
         sensor_differential_pressure_pa: sample.differential_pressure_pa,
         sensor_barometric_altitude_m: sample.barometric_altitude_m,
@@ -254,6 +276,7 @@ mod tests {
         assert_eq!(initial.time_s, 0.0);
         assert!((next.time_s - 0.01).abs() < 1.0e-12);
         assert!(next.north_m > initial.north_m);
+        assert_eq!(initial.east_m, 0.0);
         assert!(next.altitude_m < initial.altitude_m);
     }
 }

@@ -25,5 +25,9 @@ path = "src/main.rs"
 name = "plant-bridge"
 path = "src/bin/plant-bridge.rs"
 
+[[bin]]
+name = "interactive-bridge"
+path = "src/bin/interactive-bridge.rs"
+
 [lints]
 workspace = true

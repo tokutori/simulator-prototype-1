@@ -54,8 +54,12 @@ pub enum SensorError {
 /// Sampled sensor outputs held between configured update instants.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SensorSample {
+    /// Quantized fused roll angle.
+    pub roll_rad: f64,
     /// Quantized fused pitch angle.
     pub pitch_rad: f64,
+    /// Quantized fused yaw/heading angle.
+    pub yaw_rad: f64,
     /// Quantized, biased angular rates in body axes.
     pub gyro_rad_s: Vec3,
     /// Specific force at the centre of gravity, excluding gravity.
@@ -158,10 +162,10 @@ impl SensorSuite {
     }
 
     fn capture_imu(&mut self, state: RigidBodyState, loads: AeroLoads, mass_kg: f64) {
-        self.sample.pitch_rad = quantize(
-            state.attitude_body_to_ned.to_euler().y,
-            self.model.euler_resolution_rad,
-        );
+        let euler = state.attitude_body_to_ned.to_euler();
+        self.sample.roll_rad = quantize(euler.x, self.model.euler_resolution_rad);
+        self.sample.pitch_rad = quantize(euler.y, self.model.euler_resolution_rad);
+        self.sample.yaw_rad = quantize(euler.z, self.model.euler_resolution_rad);
         self.sample.gyro_rad_s = quantize_vec3(
             state.rates_body_rad_s + self.model.gyro_bias_rad_s,
             self.model.gyro_resolution_rad_s,

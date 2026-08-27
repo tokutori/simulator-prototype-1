@@ -7,7 +7,11 @@ export interface PlantObservation {
   elevator_rad: number;
   rudder_rad: number;
   sensor_pitch_rad: number;
+  sensor_roll_rad: number;
+  sensor_yaw_rad: number;
+  sensor_roll_rate_rad_s: number;
   sensor_pitch_rate_rad_s: number;
+  sensor_yaw_rate_rad_s: number;
   sensor_airspeed_mps: number;
   sensor_differential_pressure_pa: number;
   sensor_barometric_altitude_m: number;
@@ -76,9 +80,17 @@ export class Bno055Device extends RegisterDevice {
   }
 
   update(observation: PlantObservation, fault: SensorFaultKind = 'none'): void {
+    const gyroXRaw = clampI16(Math.round(observation.sensor_roll_rate_rad_s * 180 / Math.PI * 16));
     const gyroRaw = clampI16(Math.round(observation.sensor_pitch_rate_rad_s * 180 / Math.PI * 16));
+    const gyroZRaw = clampI16(Math.round(observation.sensor_yaw_rate_rad_s * 180 / Math.PI * 16));
+    const headingRaw = clampI16(Math.round(observation.sensor_yaw_rad * 180 / Math.PI * 16));
+    const rollRaw = clampI16(Math.round(observation.sensor_roll_rad * 180 / Math.PI * 16));
     const pitchRaw = clampI16(Math.round(observation.sensor_pitch_rad * 180 / Math.PI * 16));
+    putI16Le(this.registers, 0x14, gyroXRaw);
     putI16Le(this.registers, 0x16, gyroRaw);
+    putI16Le(this.registers, 0x18, gyroZRaw);
+    putI16Le(this.registers, 0x1a, headingRaw);
+    putI16Le(this.registers, 0x1c, rollRaw);
     putI16Le(this.registers, 0x1e, pitchRaw);
     this.registers[0x39] = fault === 'bno-status' ? 0x01 : 0x05;
     this.registers[0x3a] = fault === 'bno-status' ? 0x09 : 0x00;

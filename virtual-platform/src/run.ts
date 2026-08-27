@@ -130,7 +130,12 @@ async function main(): Promise<void> {
   const cycleNanos = 1e9 / 125_000_000 * args.timingAcceleration;
   const pwm = mcu.pwm.channels[0];
   if (!pwm) throw new Error('rp2040js has no PWM slice 0');
-  const safetyPin = mcu.gpio[17];
+  // Released active-low buttons and centred analog stick with full auto authority.
+  for (const pinNumber of [10, 11, 12, 13]) mcu.gpio[pinNumber]?.setInputValue(true);
+  mcu.adc.channelValues[0] = 2048;
+  mcu.adc.channelValues[1] = 2048;
+  mcu.adc.channelValues[2] = 4095;
+  const safetyPin = mcu.gpio[21];
   const invalidPin = mcu.gpio[18];
   const controlTickPin = mcu.gpio[19];
   const deadlinePin = mcu.gpio[20];
@@ -230,7 +235,7 @@ async function main(): Promise<void> {
   const outputPath = resolve(repositoryRoot, args.output);
   mkdirSync(dirname(outputPath), { recursive: true });
   const output = createWriteStream(outputPath, { encoding: 'utf8' });
-  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed\n');
+  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed\n');
   let nextFirmwareTickUs = simulator.clock.micros + 10_000;
   let runningMinimumAltitude = observation.altitude_m;
   let maximumReascent = 0;
@@ -242,8 +247,10 @@ async function main(): Promise<void> {
 
   for (let step = 0; step < args.steps && !observation.surface_contact; step += 1) {
     const pulseUs = pwm.cc & 0xffff;
+    const rudderPulseUs = (pwm.cc >>> 16) & 0xffff;
     const elevatorCommandRad = (pulseUs - 1500) * (10 * Math.PI / 180) / 500;
-    bridge.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: 0 })}\n`);
+    const rudderCommandRad = (rudderPulseUs - 1500) * (10 * Math.PI / 180) / 500;
+    bridge.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
     observation = await readObservation();
     updateDevices();
     const flightPathDeg = observation.flight_path_rad * 180 / Math.PI;
@@ -251,11 +258,14 @@ async function main(): Promise<void> {
     const alphaDeg = observation.sensor_alpha_rad * 180 / Math.PI;
     const commandDeg = elevatorCommandRad * 180 / Math.PI;
     const actualDeg = observation.elevator_rad * 180 / Math.PI;
+    const rudderCommandDeg = rudderCommandRad * 180 / Math.PI;
+    const rudderActualDeg = observation.rudder_rad * 180 / Math.PI;
     const faultInjected = activeSensorFault() !== 'none' || updateFaultActive;
     output.write([
       observation.time_s.toFixed(5), observation.north_m.toFixed(6), observation.altitude_m.toFixed(6),
       flightPathDeg.toFixed(6), pitchDeg.toFixed(6), observation.sensor_airspeed_mps.toFixed(6),
       alphaDeg.toFixed(6), commandDeg.toFixed(6), actualDeg.toFixed(6),
+      rudderCommandDeg.toFixed(6), rudderActualDeg.toFixed(6),
       Number(observation.aero_in_range), Number(observation.surface_contact), Number(faultInjected),
       Number(sensorSampleInvalid), Number(safetyFailsafe), Number(deadlineMissed),
     ].join(',') + '\n');

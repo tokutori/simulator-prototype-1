@@ -21,7 +21,11 @@ function observation(overrides: Partial<PlantObservation> = {}): PlantObservatio
     elevator_rad: 0,
     rudder_rad: 0,
     sensor_pitch_rad: 0,
+    sensor_roll_rad: 0,
+    sensor_yaw_rad: 0,
+    sensor_roll_rate_rad_s: 0,
     sensor_pitch_rate_rad_s: 0,
+    sensor_yaw_rate_rad_s: 0,
     sensor_airspeed_mps: 5,
     sensor_differential_pressure_pa: 14.55,
     sensor_barometric_altitude_m: 10.5,
@@ -43,13 +47,19 @@ test('Sensirion CRC-8 matches the datasheet example', () => {
   assert.equal(crc8(Uint8Array.from([0xbe, 0xef])), 0x92);
 });
 
-test('BNO055 exposes 1/16-degree little-endian pitch and pitch rate', () => {
+test('BNO055 exposes all FBW attitude and rate channels at 1/16 degree', () => {
   const device = new Bno055Device();
   device.update(observation({
     sensor_pitch_rad: -1.25 * Math.PI / 180,
+    sensor_roll_rad: 3 * Math.PI / 180,
+    sensor_yaw_rad: 4 * Math.PI / 180,
+    sensor_roll_rate_rad_s: -1 * Math.PI / 180,
     sensor_pitch_rate_rad_s: 2.5 * Math.PI / 180,
+    sensor_yaw_rate_rad_s: 1.5 * Math.PI / 180,
   }));
+  assert.deepEqual(readRegisters(device, 0x14, 6), [0xf0, 0xff, 40, 0, 24, 0]);
   assert.deepEqual(readRegisters(device, 0x16, 2), [40, 0]);
+  assert.deepEqual(readRegisters(device, 0x1a, 4), [64, 0, 48, 0]);
   assert.deepEqual(readRegisters(device, 0x1e, 2), [0xec, 0xff]);
   assert.deepEqual(readRegisters(device, 0x00, 1), [0xa0]);
   assert.deepEqual(readRegisters(device, 0x39, 2), [0x05, 0x00]);

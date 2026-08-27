@@ -5,15 +5,14 @@ import {
   Color,
   DirectionalLight,
   Fog,
-  GridHelper,
   Group,
   HemisphereLight,
   Line,
   LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
+  PCFSoftShadowMap,
   PerspectiveCamera,
-  PlaneGeometry,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -22,6 +21,7 @@ import {
 import "./style.css";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
+import { createDistanceRings } from "./distance-rings.ts";
 import {
   PilotInput,
   defaultInputSettings,
@@ -30,6 +30,7 @@ import {
   type InputSettings,
 } from "./input.ts";
 import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
+import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
   AppMode,
   CameraMode,
@@ -44,6 +45,7 @@ const canvas = element<HTMLCanvasElement>("flight-view");
 const renderer = new WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = PCFSoftShadowMap;
 
 const scene = new Scene();
 scene.background = new Color(0x86b7cd);
@@ -51,7 +53,7 @@ scene.fog = new Fog(0x86b7cd, 180, 950);
 const camera = new PerspectiveCamera(55, 1, 0.08, 1800);
 const aircraft = createAircraft();
 scene.add(aircraft.root);
-buildEnvironment(scene);
+const environment = buildEnvironment(scene);
 
 let mode: AppMode = "replay";
 let cameraMode: CameraMode = "chase";
@@ -118,6 +120,7 @@ function animate(nowMs: number): void {
   if (frame) {
     displayFrame(frame, deltaS);
   }
+  environment.update(nowMs / 1000, aircraft.root.position);
   renderer.render(scene, camera);
 }
 
@@ -157,31 +160,32 @@ function displayFrame(frame: FlightFrame, deltaS: number): void {
   updateHud(frame);
 }
 
-function buildEnvironment(target: Scene): void {
+interface FlightEnvironment {
+  update(timeS: number, focus: Vector3): void;
+}
+
+function buildEnvironment(target: Scene): FlightEnvironment {
   target.add(new HemisphereLight(0xd9f3ff, 0x355d59, 2.2));
   target.add(new AmbientLight(0xffffff, 0.25));
   const sun = new DirectionalLight(0xfff3d7, 2.4);
-  sun.position.set(-80, 130, 40);
+  const sunOffset = new Vector3(-80, 130, 40);
+  sun.position.copy(sunOffset);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -80;
-  sun.shadow.camera.right = 80;
-  sun.shadow.camera.top = 80;
-  sun.shadow.camera.bottom = -80;
+  sun.shadow.camera.left = -42;
+  sun.shadow.camera.right = 42;
+  sun.shadow.camera.top = 42;
+  sun.shadow.camera.bottom = -42;
+  sun.shadow.camera.near = 55;
+  sun.shadow.camera.far = 230;
+  sun.shadow.bias = -0.00012;
+  sun.shadow.normalBias = 0.035;
   target.add(sun);
+  target.add(sun.target);
 
-  const water = new Mesh(
-    new PlaneGeometry(2000, 2000),
-    new MeshStandardMaterial({ color: 0x2b7890, roughness: 0.34, metalness: 0.08 }),
-  );
-  water.rotation.x = -Math.PI / 2;
-  water.receiveShadow = true;
-  target.add(water);
-  const grid = new GridHelper(1000, 100, 0x87c8d3, 0x3b8292);
-  grid.position.y = 0.012;
-  grid.material.opacity = 0.26;
-  grid.material.transparent = true;
-  target.add(grid);
+  const water: AnimatedWater = createAnimatedWater();
+  target.add(water.mesh);
+  target.add(createDistanceRings());
 
   const platform = new Group();
   const concrete = new MeshStandardMaterial({ color: 0xd5d2c7, roughness: 0.9 });
@@ -204,6 +208,16 @@ function buildEnvironment(target: Scene): void {
     buoy.position.set(north % 100 === 0 ? 18 : -18, 0.28, -north);
     target.add(buoy);
   }
+
+  return {
+    update(timeS: number, focus: Vector3): void {
+      water.update(timeS);
+      // The directional-light shadow camera is finite even though it models
+      // sunlight. Tracking the aircraft prevents a hard cutoff after launch.
+      sun.target.position.set(focus.x, 0, focus.z);
+      sun.position.copy(sun.target.position).add(sunOffset);
+    },
+  };
 }
 
 function bindControls(): void {

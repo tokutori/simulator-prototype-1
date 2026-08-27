@@ -39,7 +39,7 @@ datasheetを区別して追跡します。実機挙動、飛距離、stall safet
 - BNO055、AS5600、SDP810、DPS310のdatasheet-level register protocolとSDP CRC
 - status/CRC/I²C NACKの決定的fault injectionとactual-UF2永続故障sweep
 - SDP810単独喪失時のheld-airspeed、相対気圧高度pull-outを使うdegraded controlと17 model stress比較
-- Three.jsによる一人称/追従三人称replay、HUD、CSV読込み
+- Three.jsによる一人称/追従三人称replay、動く波面、start中心距離ring、HUD、CSV読込み
 - keyboard/gamepadの設定可能なelevator/rudder入力とmanual/shared/auto連続authority比較
 
 ## 実行

@@ -22,6 +22,11 @@ local Rust processを起動できないため、interactive modeには`server.ts
 
 - `Cockpit`: pilot位置相当から水面、水平線、platform、翼端を見る。
 - `Chase`: 水平を保った追従cameraで機体姿勢と軌道を見る。
+- 水面には25 m間隔のstart中心AR distance ringを置き、50 mごとに距離を表示する。
+- 水面は複数波長の時間変化する波として描画する。距離感のためのvisual-only表現であり、
+  FDMの風、波、着水面には入力しない。
+- directional-lightのshadow cameraは機体に追従させ、launch areaから離れた後もshadow mapの
+  有効範囲から機体が外れないようにする。
 - `V`: camera切替、`H`: HUD切替、`Space`: replayのpause/play。
 - default replayは`reports/run.csv`を20 Hzへdownsampleしたtracked sampleである。
 - 任意の`sim-cli` CSVまたはinteractive logをfile inputから再生できる。

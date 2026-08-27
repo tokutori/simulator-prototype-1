@@ -17,6 +17,27 @@ initial SP/reset PCから実行する。firmware sourceにはsimulator専用peri
 | actuator | KRS-compatible PWM | 20 ms、1000～2000 us、RP2040 PWM MMIO | loaded travel、backlash、current、brownout |
 | plant | Rust nonlinear 6DoF | same plant as native reference run | real aircraft coefficient validity |
 
+## Pilot input and output pin contract
+
+production firmwareはpilot hardwareとsimulatorで同じpin contractを使う。ADCはRP2040の12-bit
+countとして読み、中央±164 countをdead zoneにする。buttonはactive-lowで、押されている間は
+対応axisをfull demandへoverrideし、反対button同時押しはneutralにする。
+
+| GPIO | function |
+| ---: | --- |
+| 26 / ADC0 | elevator analog axis、正は機首下げ |
+| 27 / ADC1 | rudder analog axis、正はright-yaw要求 |
+| 28 / ADC2 | automatic authority、0=manual、4095=auto |
+| 10 / 11 | elevator nose-up / nose-down button |
+| 12 / 13 | rudder left / right button |
+| 16 / PWM0A | elevator servo PWM |
+| 17 / PWM0B | rudder servo PWM |
+| 18 / 19 / 20 / 21 | invalid / control tick / deadline miss / safety diagnostic |
+
+manual/automatic commandはauthorityで線形blendする。両舵とも1000～2000 usへ制限する。
+analog joystick、button、authority potentiometerの電気故障、接点bounce、断線検出は未実装であり、
+実配線決定後にpull-up、range plausibility、redundancyをrisk assessmentする必要がある。
+
 BNO055の650 ms POR、SDP810の最初の8 ms、DPS310のmeasurement設定をfirmware側で扱う。
 BNO055公式datasheetはfusionが主に人の動作用で、持続する大加速度を重力と誤認し得るため、
 status正常だけを姿勢精度の証拠にはしない。

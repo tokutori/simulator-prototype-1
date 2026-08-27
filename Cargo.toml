@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/fbw-control-core",
+  "crates/fbw-input-core",
   "crates/fbw-safety-core",
   "crates/flight-dynamics-core",
   "crates/qx18-fbw-config",

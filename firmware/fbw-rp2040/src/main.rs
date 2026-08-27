@@ -5,8 +5,9 @@ mod sensors;
 
 use core::f32::consts::PI;
 use cortex_m_rt::entry;
-use embedded_hal::{delay::DelayNs, digital::OutputPin, pwm::SetDutyCycle};
+use embedded_hal::{delay::DelayNs, digital::{InputPin, OutputPin}, pwm::SetDutyCycle};
 use fbw_control_core::{ControllerInput, ControllerState};
+use fbw_input_core::{RawPilotInput, blend, decode};
 use fbw_safety_core::{SafetyConfig, SafetyMode, SafetyState};
 use fugit::RateExtU32;
 use panic_halt as _;
@@ -24,6 +25,7 @@ const CONTROL_PERIOD_US: u32 = 10_000;
 const SERVO_PWM_TOP: u16 = 19_999;
 const SERVO_CENTER_US: f32 = 1_500.0;
 const SERVO_US_PER_RAD: f32 = 500.0 / (10.0 * PI / 180.0);
+const SURFACE_LIMIT_RAD: f32 = 10.0 * PI / 180.0;
 const SENSOR_RETRY_SAMPLES: u16 = 100;
 const SAFETY_CONFIG: SafetyConfig = SafetyConfig {
     startup_valid_samples: 10,
@@ -65,17 +67,28 @@ fn main() -> ! {
         clocks.peripheral_clock.freq(),
     );
 
+    let mut adc = hal::adc::Adc::new(pac.ADC, &mut pac.RESETS);
+    let mut elevator_axis = hal::adc::AdcPin::new(pins.gpio26.into_floating_input()).unwrap();
+    let mut rudder_axis = hal::adc::AdcPin::new(pins.gpio27.into_floating_input()).unwrap();
+    let mut authority_axis = hal::adc::AdcPin::new(pins.gpio28.into_floating_input()).unwrap();
+    let mut elevator_negative = pins.gpio10.into_pull_up_input();
+    let mut elevator_positive = pins.gpio11.into_pull_up_input();
+    let mut rudder_negative = pins.gpio12.into_pull_up_input();
+    let mut rudder_positive = pins.gpio13.into_pull_up_input();
+
     let pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
     let mut servo_pwm = pwm_slices.pwm0;
     servo_pwm.set_div_int(125);
     servo_pwm.set_div_frac(0);
     servo_pwm.set_top(SERVO_PWM_TOP);
     let _servo_pin = servo_pwm.channel_a.output_to(pins.gpio16);
+    let _rudder_servo_pin = servo_pwm.channel_b.output_to(pins.gpio17);
     servo_pwm.channel_a.set_enabled(true);
+    servo_pwm.channel_b.set_enabled(true);
     servo_pwm.enable();
-    // GPIO17 high means unarmed/failsafe; GPIO18 high marks an invalid live sample.
+    // GPIO21 high means unarmed/failsafe; GPIO18 high marks an invalid live sample.
     // GPIO19 toggles once per control update; GPIO20 marks a missed 10 ms period.
-    let mut safety_fault = pins.gpio17.into_push_pull_output();
+    let mut safety_fault = pins.gpio21.into_push_pull_output();
     let mut sensor_invalid = pins.gpio18.into_push_pull_output();
     let mut control_tick = pins.gpio19.into_push_pull_output();
     let mut deadline_missed = pins.gpio20.into_push_pull_output();
@@ -123,7 +136,7 @@ fn main() -> ! {
         let all_sensors_valid = measurement_frame
             .as_ref()
             .is_some_and(|frame| frame.all_sensors_valid);
-        let candidate = measurement_frame.map(|frame| {
+        let automatic_elevator = measurement_frame.map(|frame| {
             let measurement = frame.measurements;
             controller
                 .step(
@@ -140,13 +153,44 @@ fn main() -> ! {
                 )
                 .elevator_command_rad
         });
-        let safe = safety.step(&SAFETY_CONFIG, candidate);
+        let automatic_rudder = measurement_frame.map_or(0.0, |frame| {
+            let measurement = frame.measurements;
+            (-0.30 * measurement.roll_rad - 0.45 * measurement.roll_rate_rad_s
+                + 0.35 * measurement.yaw_rate_rad_s)
+                .clamp(-SURFACE_LIMIT_RAD, SURFACE_LIMIT_RAD)
+        });
+        let safe = safety.step(&SAFETY_CONFIG, automatic_elevator);
         if safe.reset_controller {
             controller = ControllerState::default();
         }
-        let pulse_us =
-            (SERVO_CENTER_US + safe.command_rad * SERVO_US_PER_RAD).clamp(1_000.0, 2_000.0);
-        let _ = servo_pwm.channel_a.set_duty_cycle(pulse_us as u16);
+        let pilot = decode(RawPilotInput {
+            elevator_adc: adc.read(&mut elevator_axis).unwrap_or(2048),
+            rudder_adc: adc.read(&mut rudder_axis).unwrap_or(2048),
+            authority_adc: adc.read(&mut authority_axis).unwrap_or(4095),
+            elevator_negative: elevator_negative.is_low().unwrap_or(false),
+            elevator_positive: elevator_positive.is_low().unwrap_or(false),
+            rudder_negative: rudder_negative.is_low().unwrap_or(false),
+            rudder_positive: rudder_positive.is_low().unwrap_or(false),
+        });
+        let elevator_command = blend(
+            pilot.elevator * SURFACE_LIMIT_RAD,
+            safe.command_rad,
+            pilot.autonomy,
+            SURFACE_LIMIT_RAD,
+        );
+        // QX-18's reconstructed Cn_delta_r is negative: a right-yaw demand uses negative rudder.
+        let rudder_command = blend(
+            -pilot.rudder * SURFACE_LIMIT_RAD,
+            automatic_rudder,
+            pilot.autonomy,
+            SURFACE_LIMIT_RAD,
+        );
+        let elevator_pulse_us =
+            (SERVO_CENTER_US + elevator_command * SERVO_US_PER_RAD).clamp(1_000.0, 2_000.0);
+        let rudder_pulse_us =
+            (SERVO_CENTER_US + rudder_command * SERVO_US_PER_RAD).clamp(1_000.0, 2_000.0);
+        let _ = servo_pwm.channel_a.set_duty_cycle(elevator_pulse_us as u16);
+        let _ = servo_pwm.channel_b.set_duty_cycle(rudder_pulse_us as u16);
         if matches!(safe.mode, SafetyMode::Arming | SafetyMode::Failsafe) {
             let _ = safety_fault.set_high();
         } else {

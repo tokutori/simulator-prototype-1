@@ -12,7 +12,7 @@ const BNO055_OPERATION_MODE: u8 = 0x3d;
 const BNO055_NDOF_MODE: u8 = 0x0c;
 const BNO055_CHIP_ID: u8 = 0x00;
 const BNO055_EXPECTED_CHIP_ID: u8 = 0xa0;
-const BNO055_GYRO_Y_LSB: u8 = 0x16;
+const BNO055_GYRO_X_LSB: u8 = 0x14;
 const BNO055_SYSTEM_STATUS: u8 = 0x39;
 const BNO055_FUSION_RUNNING: u8 = 0x05;
 const AS5600_STATUS: u8 = 0x0b;
@@ -55,8 +55,11 @@ pub enum SensorError<E> {
 /// Measurements presented to the platform-independent controller.
 #[derive(Clone, Copy)]
 pub struct Measurements {
+    pub roll_rad: f32,
     pub pitch_rad: f32,
+    pub roll_rate_rad_s: f32,
     pub pitch_rate_rad_s: f32,
+    pub yaw_rate_rad_s: f32,
     pub airspeed_mps: f32,
     pub alpha_rad: f32,
     pub barometric_altitude_m: f32,
@@ -155,11 +158,14 @@ impl SensorState {
             });
         }
 
-        let mut bno = [0_u8; 10];
-        i2c.write_read(BNO055_ADDRESS, &[BNO055_GYRO_Y_LSB], &mut bno)
+        let mut bno = [0_u8; 12];
+        i2c.write_read(BNO055_ADDRESS, &[BNO055_GYRO_X_LSB], &mut bno)
             .map_err(SensorError::Bus)?;
-        let gyro_y_raw = i16::from_le_bytes([bno[0], bno[1]]);
-        let pitch_raw = i16::from_le_bytes([bno[8], bno[9]]);
+        let gyro_x_raw = i16::from_le_bytes([bno[0], bno[1]]);
+        let gyro_y_raw = i16::from_le_bytes([bno[2], bno[3]]);
+        let gyro_z_raw = i16::from_le_bytes([bno[4], bno[5]]);
+        let roll_raw = i16::from_le_bytes([bno[8], bno[9]]);
+        let pitch_raw = i16::from_le_bytes([bno[10], bno[11]]);
 
         let mut as5600_status = [0_u8; 1];
         i2c.write_read(AS5600_ADDRESS, &[AS5600_STATUS], &mut as5600_status)
@@ -195,8 +201,11 @@ impl SensorState {
 
         Ok(MeasurementFrame {
             measurements: Measurements {
+                roll_rad: f32::from(roll_raw) / 16.0 * PI / 180.0,
                 pitch_rad: f32::from(pitch_raw) / 16.0 * PI / 180.0,
+                roll_rate_rad_s: f32::from(gyro_x_raw) / 16.0 * PI / 180.0,
                 pitch_rate_rad_s: f32::from(gyro_y_raw) / 16.0 * PI / 180.0,
+                yaw_rate_rad_s: f32::from(gyro_z_raw) / 16.0 * PI / 180.0,
                 airspeed_mps,
                 alpha_rad: wrapped_angle as f32 * (2.0 * PI / 4096.0),
                 barometric_altitude_m: altitude_m,

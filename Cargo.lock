@@ -205,6 +205,10 @@ name = "fbw-control-core"
 version = "0.1.0"
 
 [[package]]
+name = "fbw-input-core"
+version = "0.1.0"
+
+[[package]]
 name = "fbw-safety-core"
 version = "0.1.0"
 

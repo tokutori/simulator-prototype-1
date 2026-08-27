@@ -11,6 +11,7 @@ rust-version = "1.88"
 cortex-m-rt = "0.7.6"
 embedded-hal = "1.0.0"
 fbw-control-core = { path = "../../crates/fbw-control-core" }
+fbw-input-core = { path = "../../crates/fbw-input-core" }
 fbw-safety-core = { path = "../../crates/fbw-safety-core" }
 fugit = "0.3.7"
 libm = "0.2.15"

@@ -271,12 +271,17 @@ name = "fbw-control-core"
 version = "0.1.0"
 
 [[package]]
+name = "fbw-input-core"
+version = "0.1.0"
+
+[[package]]
 name = "fbw-rp2040"
 version = "0.1.0"
 dependencies = [
  "cortex-m-rt",
  "embedded-hal 1.0.0",
  "fbw-control-core",
+ "fbw-input-core",
  "fbw-safety-core",
  "fugit",
  "libm",

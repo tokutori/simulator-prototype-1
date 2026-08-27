@@ -116,6 +116,7 @@ docs/
   verification.md
   flight-validation.md
   interactive-visualizer.md
+  ui-scaling.md
   roadmap.md
 ```
 

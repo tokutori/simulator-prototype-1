@@ -16,6 +16,7 @@ button, select, input[type="number"], input[type="text"], .file-control {
   background: rgba(8, 24, 31, 0.9);
 }
 button, .file-control { padding: 0.46rem 0.7rem; cursor: pointer; }
+button, select, input[type="number"], input[type="text"], .file-control { min-height: 1.75rem; }
 button:hover, button:focus-visible, .file-control:hover { border-color: #e6a44c; }
 button.active, button[aria-pressed="true"] { color: #07131a; background: #e6a44c; border-color: #f4c27f; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -24,7 +25,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .top-bar, .hud, .camera-controls, .bottom-panel, .message, .shortcut-help { position: absolute; z-index: 3; }
 .top-bar {
   top: 0; left: 0; right: 0; display: flex; align-items: flex-start; justify-content: space-between;
-  padding: 1rem 1.25rem; pointer-events: none;
+  padding: max(1rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) 1rem max(1.25rem, env(safe-area-inset-left)); pointer-events: none;
   background: linear-gradient(to bottom, rgba(3, 14, 19, 0.72), transparent);
 }
 .top-bar h1 { margin: 0.15rem 0 0; font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 500; letter-spacing: 0.02em; }
@@ -75,7 +76,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .flight-event p { margin: 0.38rem 0 0; color: #b8cbc8; font: 0.72rem/1.3 ui-monospace, monospace; }
 
 .camera-controls { top: 1rem; left: 50%; transform: translateX(-50%); display: flex; gap: 0.35rem; }
-.bottom-panel { left: 1rem; right: 1rem; bottom: 1rem; padding: 0.65rem; background: rgba(5, 18, 24, 0.86); border: 1px solid rgba(214, 235, 232, 0.22); border-radius: 6px; backdrop-filter: blur(10px); }
+.bottom-panel { left: max(1rem, env(safe-area-inset-left)); right: max(1rem, env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); padding: 0.65rem; background: rgba(5, 18, 24, 0.86); border: 1px solid rgba(214, 235, 232, 0.22); border-radius: 6px; backdrop-filter: blur(10px); }
 .mode-controls, .replay-controls, .live-controls { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
 .mode-controls { margin-bottom: 0.55rem; }
 .replay-controls input[type="range"], .live-controls input[type="range"] { flex: 1 1 16rem; accent-color: #e6a44c; }

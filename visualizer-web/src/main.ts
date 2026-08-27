@@ -39,10 +39,12 @@ import type {
   InteractiveObservation,
   PilotCommandMessage,
 } from "./types.ts";
+import { applyUiScale } from "./ui-scale.ts";
 
 const settingsKey = "birdman-visualizer-input-v1";
 const radiansToDegrees = 180 / Math.PI;
 const canvas = element<HTMLCanvasElement>("flight-view");
+applyUiScale(window.innerWidth, window.innerHeight);
 const renderer = new WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -626,6 +628,7 @@ function downloadLiveLog(): void {
 }
 
 function resize(): void {
+  applyUiScale(window.innerWidth, window.innerHeight);
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
   renderer.setSize(width, height, false);

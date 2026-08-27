@@ -18,6 +18,10 @@ npm.cmd run dev
 production buildだけを確認する場合は`npm.cmd run build`を使う。静的な`dist`だけでは
 local Rust processを起動できないため、interactive modeには`server.ts`が必要である。
 
+UIは1920×1080を1、3840×2160を2とするshortest-side比率でscaleする。FHDから4Kまで
+同じ視野内占有率を保ち、ultrawideでは高さ側に合わせる。詳細は[UI scaling](ui-scaling.md)を
+参照する。
+
 ## 表示
 
 - `Cockpit`: pilot位置相当から水面、水平線、platform、翼端を見る。

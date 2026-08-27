@@ -17,27 +17,50 @@
         </div>
         <div class="status-cluster">
           <span id="mode-badge" class="mode-badge">REPLAY</span>
+          <span id="phase-badge" class="phase-badge">READY</span>
           <span id="connection-status" role="status">sample flight</span>
         </div>
       </header>
 
       <section id="hud" class="hud" aria-label="Flight telemetry">
-        <div class="readout primary-readout">
-          <span>IAS</span><strong id="airspeed-value">--</strong><small>m/s</small>
+        <div class="telemetry-stack">
+          <div class="primary-instruments">
+            <div id="airspeed-instrument" class="primary-instrument">
+              <span>AIRSPEED</span><strong id="airspeed-value">--</strong><small>m/s</small>
+            </div>
+            <div id="altitude-instrument" class="primary-instrument">
+              <span>ALTITUDE</span><strong id="altitude-value">--</strong><small>m ASL</small>
+            </div>
+          </div>
+          <div class="secondary-instruments">
+            <div class="readout"><span>γ</span><strong id="gamma-value">--</strong><small>deg</small></div>
+            <div class="readout"><span>α</span><strong id="alpha-value">--</strong><small>deg</small></div>
+            <div class="readout"><span>ROLL</span><strong id="roll-value">--</strong><small>deg</small></div>
+            <div class="readout flight-clock"><span>T+</span><strong id="time-value">--:--.--</strong></div>
+          </div>
+          <div class="pilot-readout">
+            <div><span>PILOT ELEV</span><meter id="pilot-elevator-meter" min="-1" max="1" value="0"></meter></div>
+            <div><span>PILOT RUDD</span><meter id="pilot-rudder-meter" min="-1" max="1" value="0"></meter></div>
+          </div>
         </div>
-        <div class="readout primary-readout">
-          <span>ALT</span><strong id="altitude-value">--</strong><small>m</small>
+
+        <div class="surface-panel" aria-label="Control surface positions">
+          <div class="surface-title"><span>CONTROL SURFACES</span><small>◇ CMD&nbsp;&nbsp;● ACTUAL</small></div>
+          <div class="surface-row">
+            <div class="surface-heading"><span>ELEVATOR</span><strong id="elevator-value">-- deg</strong></div>
+            <div class="surface-scale"><small>−10</small><div id="elevator-track" class="surface-track"><i></i><b></b></div><small>+10</small></div>
+          </div>
+          <div class="surface-row">
+            <div class="surface-heading"><span>RUDDER</span><strong id="rudder-value">-- deg</strong></div>
+            <div class="surface-scale"><small>−10</small><div id="rudder-track" class="surface-track"><i></i><b></b></div><small>+10</small></div>
+          </div>
         </div>
-        <div class="readout"><span>γ</span><strong id="gamma-value">--</strong><small>deg</small></div>
-        <div class="readout"><span>α</span><strong id="alpha-value">--</strong><small>deg</small></div>
-        <div class="readout"><span>ROLL</span><strong id="roll-value">--</strong><small>deg</small></div>
-        <div class="readout"><span>TIME</span><strong id="time-value">--</strong><small>s</small></div>
-        <div class="command-readout">
-          <div><span>PILOT ELEV</span><meter id="pilot-elevator-meter" min="-1" max="1" value="0"></meter></div>
-          <div><span>PILOT RUDD</span><meter id="pilot-rudder-meter" min="-1" max="1" value="0"></meter></div>
-          <div><span>ACTUAL ELEV</span><strong id="elevator-value">-- deg</strong></div>
-          <div><span>ACTUAL RUDD</span><strong id="rudder-value">-- deg</strong></div>
-        </div>
+      </section>
+
+      <section id="flight-event" class="flight-event" aria-live="polite">
+        <span id="flight-event-kicker">FLIGHT STATUS</span>
+        <strong id="flight-event-title">READY</strong>
+        <p id="flight-event-detail">Waiting for flight data</p>
       </section>
 
       <section class="camera-controls" aria-label="Camera controls">

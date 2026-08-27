@@ -31,6 +31,14 @@ local Rust processを起動できないため、interactive modeには`server.ts
 - default replayは`reports/run.csv`を20 Hzへdownsampleしたtracked sampleである。
 - 任意の`sim-cli` CSVまたはinteractive logをfile inputから再生できる。
 
+HUDではairspeedとwater面基準altitudeを大形表示し、altitudeが2 m未満になると色を変える。
+経路角、迎角、roll、`T+ mm:ss.ss`を補助表示する。control-surface panelはelevator/rudderの
+mixed commandを菱形、servo dynamics通過後のactual positionを丸で示し、数値も併記する。
+
+flight phaseは`READY`、`LAUNCH`、`FLYING`、`WATER CONTACT`を区別する。replay dataが
+水面へ到達する前に終わった場合は`END OF RECORDING`と表示し、着水と誤認させない。
+着水時はflight time、startからの水平range、airspeedを中央に表示する。
+
 座標はNED/FRDからThree.jsの右手`Y-up`へ固定matrixで変換する。
 
 ```text
@@ -116,5 +124,6 @@ npm.cmd run build
 npm.cmd run smoke:live
 ```
 
-testは座標変換、CSV補間、dead zone、button同時押し/neutral復帰、設定sanitizeを検証する。
+testは座標変換、CSV補間、flight phase、flight clock、dead zone、
+button同時押し/neutral復帰、設定sanitizeを検証する。
 smoke testはHTTP sampleとWebSocket経由のmanual/shared/auto telemetryを確認する。

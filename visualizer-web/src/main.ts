@@ -22,6 +22,7 @@ import "./style.css";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
 import { createDistanceRings } from "./distance-rings.ts";
+import { classifyFlightPhase, formatFlightTime, type FlightPhase } from "./flight-phase.ts";
 import {
   PilotInput,
   defaultInputSettings,
@@ -158,6 +159,7 @@ function displayFrame(frame: FlightFrame, deltaS: number): void {
     camera.updateProjectionMatrix();
   }
   updateHud(frame);
+  updateFlightPhase(frame);
 }
 
 interface FlightEnvironment {
@@ -385,6 +387,8 @@ function connectLive(): void {
   pilotInput.clear();
   element<HTMLButtonElement>("download-live").disabled = true;
   element("connection-status").textContent = "connecting…";
+  setFlightEvent("SYSTEM READY", "READY", "Waiting for the first RP2040-independent host FDM sample");
+  setPhaseBadge("ready");
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${protocol}//${location.host}/live`);
   socket.addEventListener("open", () => {
@@ -432,16 +436,76 @@ function setCameraMode(next: CameraMode): void {
 }
 
 function updateHud(frame: FlightFrame): void {
-  value("airspeed-value", frame.airspeedMps, 2);
-  value("altitude-value", frame.altitudeM, 2);
+  value("airspeed-value", frame.airspeedMps, 1);
+  value("altitude-value", frame.altitudeM, 1);
   value("gamma-value", frame.flightPathRad * radiansToDegrees, 1);
   value("alpha-value", frame.alphaRad * radiansToDegrees, 1);
   value("roll-value", frame.rollRad * radiansToDegrees, 1);
-  value("time-value", frame.timeS, 2);
-  element("elevator-value").textContent = `${(frame.elevatorRad * radiansToDegrees).toFixed(1)} deg`;
-  element("rudder-value").textContent = `${(frame.rudderRad * radiansToDegrees).toFixed(1)} deg`;
+  const frames = mode === "live" ? liveFrames : replayFrames;
+  const elapsedS = frame.timeS - (frames[0]?.timeS ?? frame.timeS);
+  element("time-value").textContent = formatFlightTime(elapsedS);
+  const elevatorDeg = frame.elevatorRad * radiansToDegrees;
+  const rudderDeg = frame.rudderRad * radiansToDegrees;
+  element("elevator-value").textContent = `${elevatorDeg.toFixed(1)} deg`;
+  element("rudder-value").textContent = `${rudderDeg.toFixed(1)} deg`;
+  setSurfaceTrack("elevator-track", elevatorDeg, frame.mixedElevatorCommandRad * radiansToDegrees);
+  setSurfaceTrack("rudder-track", rudderDeg, frame.mixedRudderCommandRad * radiansToDegrees);
+  element("altitude-instrument").classList.toggle("caution", frame.altitudeM < 2 && !frame.surfaceContact);
   element<HTMLMeterElement>("pilot-elevator-meter").value = mode === "live" ? pilotInput.elevator : frame.pilotElevator;
   element<HTMLMeterElement>("pilot-rudder-meter").value = mode === "live" ? pilotInput.rudder : frame.pilotRudder;
+}
+
+function updateFlightPhase(frame: FlightFrame): void {
+  const frames = mode === "live" ? liveFrames : replayFrames;
+  const first = frames[0] ?? frame;
+  const last = frames.at(-1) ?? frame;
+  const elapsedS = Math.max(0, frame.timeS - first.timeS);
+  const replayAtEnd = mode === "replay"
+    && !replayPlaying
+    && Math.abs(frame.timeS - last.timeS) < 1e-6;
+  const phase = classifyFlightPhase({
+    hasFrame: true,
+    elapsedS,
+    surfaceContact: frame.surfaceContact,
+    replayAtEnd,
+  });
+  setPhaseBadge(phase);
+  const rangeM = Math.hypot(frame.northM - first.northM, frame.eastM - first.eastM);
+  if (phase === "launch") {
+    setFlightEvent("T+ 00:00", "LAUNCH", `IAS ${frame.airspeedMps.toFixed(1)} m/s · flight clock started`);
+  } else if (phase === "water-contact") {
+    setFlightEvent(
+      "FLIGHT COMPLETE",
+      "WATER CONTACT",
+      `T+ ${formatFlightTime(elapsedS)} · RANGE ${rangeM.toFixed(1)} m · IAS ${frame.airspeedMps.toFixed(1)} m/s`,
+    );
+  } else if (phase === "record-ended") {
+    setFlightEvent(
+      "DATA STATUS",
+      "END OF RECORDING",
+      `T+ ${formatFlightTime(elapsedS)} · ALT ${frame.altitudeM.toFixed(1)} m · no water contact in this record`,
+    );
+  } else {
+    element("flight-event").hidden = true;
+  }
+}
+
+function setPhaseBadge(phase: FlightPhase): void {
+  element("phase-badge").textContent = phase.replaceAll("-", " ").toUpperCase();
+}
+
+function setFlightEvent(kicker: string, title: string, detail: string): void {
+  element("flight-event-kicker").textContent = kicker;
+  element("flight-event-title").textContent = title;
+  element("flight-event-detail").textContent = detail;
+  element("flight-event").hidden = false;
+}
+
+function setSurfaceTrack(id: string, actualDeg: number, commandDeg: number): void {
+  const position = (degrees: number): number => 50 + Math.max(-1, Math.min(1, degrees / 10)) * 46;
+  const track = element(id);
+  track.style.setProperty("--actual-position", `${position(actualDeg)}%`);
+  track.style.setProperty("--command-position", `${position(commandDeg)}%`);
 }
 
 function updateTimeline(): void {

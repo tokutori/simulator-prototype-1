@@ -33,7 +33,8 @@ UIは1920×1080を1、3840×2160を2とするshortest-side比率でscaleする�
 - directional-lightのshadow cameraは機体に追従させ、launch areaから離れた後もshadow mapの
   有効範囲から機体が外れないようにする。
 - `V`: camera切替、`H`: HUD切替、`Space`: replayのpause/play。
-- default replayは`reports/run.csv`を20 Hzへdownsampleしたtracked sampleである。
+- 起動時は`Interactive`をdefaultとし、production UF2とのlive loopを直ちに開始する。
+- sample replayは`reports/run.csv`を20 Hzへdownsampleしたtracked sampleで、`Replay`を選ぶと利用できる。
 - 任意の`sim-cli` CSVまたはinteractive logをfile inputから再生できる。
 
 HUDではairspeedとwater面基準altitudeを大形表示し、altitudeが2 m未満になると色を変える。
@@ -54,6 +55,11 @@ R_three = M R_ned M^T
 
 Euler角をThree.jsの各rotation propertyへ直接代入しない。unit testはzero attitude、
 +90 deg yaw、positive pitchを検証する。
+
+live plant sampleは100 Hzだが、WebSocket到着と60 Hz前後の描画frameは同期しない。Three.jsへは
+到着時刻基準の30 ms jitter bufferを置き、前後2 sampleを位置・姿勢・舵角とも補間して渡す。
+補間値は描画専用で、production UF2、sensor、servo、plant、保存flight logへfeedbackしない。
+最新sampleがbufferへ届かなければ最後のsampleを保持し、遅いemulationを外挿や時間伸縮で隠さない。
 
 ## Pilot input
 
@@ -124,7 +130,8 @@ fallbackはない。Rust hostに残るのはservo/aircraft plantであり、制�
 追従できるという意味だけである。
 
 実行状態はThe Elm Architectureの`Model/Msg/update/view/Effect`へ分け、判別可能unionで
-Replay、MCU接続中、実時間、性能不足、終了、失敗を表す。
+Replay、MCU接続中、実時間、性能不足、終了、失敗を表す。初期Modelも`mcu-connecting`であり、
+HTMLの初期表示と一致する。sample CSVはbackgroundで読み込むが、成功してもReplayへ勝手に遷移しない。
 
 ## Verification
 

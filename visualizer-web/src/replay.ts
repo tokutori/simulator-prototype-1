@@ -142,7 +142,7 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
   };
 }
 
-function interpolatePair(before: FlightFrame, after: FlightFrame, fraction: number): FlightFrame {
+export function interpolatePair(before: FlightFrame, after: FlightFrame, fraction: number): FlightFrame {
   const scalar = (left: number, right: number): number => left + (right - left) * fraction;
   const angle = (left: number, right: number): number => {
     const difference = Math.atan2(Math.sin(right - left), Math.cos(right - left));

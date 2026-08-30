@@ -39,6 +39,11 @@ import {
   type AxisBinding,
   type InputSettings,
 } from "./input.ts";
+import {
+  frameAtReceiptTime,
+  trimReceiptBuffer,
+  type ReceivedFlightFrame,
+} from "./live-playback.ts";
 import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
@@ -50,6 +55,7 @@ import type {
 import { applyUiScale } from "./ui-scale.ts";
 
 const settingsKey = "birdman-visualizer-input-v1";
+const livePresentationDelayMs = 30;
 const radiansToDegrees = 180 / Math.PI;
 const canvas = element<HTMLCanvasElement>("flight-view");
 applyUiScale(window.innerWidth, window.innerHeight);
@@ -66,12 +72,13 @@ const aircraft = createAircraft();
 scene.add(aircraft.root);
 const environment = buildEnvironment(scene);
 
-let appState: AppState = { tag: "replay", sourceName: "sample-flight.csv" };
+let appState: AppState = { tag: "mcu-connecting" };
 let cameraMode: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
 let liveFrames: FlightFrame[] = [];
 let liveFrame: FlightFrame | undefined;
+let liveReceiptBuffer: ReceivedFlightFrame[] = [];
 let playbackTimeS = 0;
 let replayPlaying = true;
 let playbackSpeed = 1;
@@ -87,7 +94,9 @@ let captureBinding: { axis: "elevator" | "rudder"; polarity: "negative" | "posit
 bindControls();
 syncSettingsForm();
 setCameraMode("chase");
-await loadDefaultReplay();
+renderAppState();
+runEffect({ type: "connect-mcu" });
+void loadDefaultReplay(false);
 renderer.setAnimationLoop(animate);
 window.addEventListener("resize", resize);
 resize();
@@ -128,7 +137,9 @@ function animate(nowMs: number): void {
     frame = interpolateFrame(replayFrames, playbackTimeS);
     updateTimeline();
   } else if (isInteractive(appState)) {
-    frame = liveFrame;
+    const presentationTimeMs = nowMs - livePresentationDelayMs;
+    frame = frameAtReceiptTime(liveReceiptBuffer, presentationTimeMs) ?? liveFrame;
+    trimReceiptBuffer(liveReceiptBuffer, presentationTimeMs);
   }
 
   if (frame) {
@@ -342,26 +353,28 @@ function bindKeyCapture(
   });
 }
 
-async function loadDefaultReplay(): Promise<void> {
+async function loadDefaultReplay(selectMode: boolean): Promise<void> {
   try {
     const response = await fetch("/sample-flight.csv");
     if (!response.ok) throw new Error(`sample flight HTTP ${response.status}`);
-    loadReplay(parseFlightCsv(await response.text()), "sample-flight.csv");
+    loadReplay(parseFlightCsv(await response.text()), "sample-flight.csv", selectMode);
   } catch (error) {
     showMessage(`Default replay could not be loaded: ${String(error)}`);
   }
 }
 
-function loadReplay(frames: FlightFrame[], name: string): void {
+function loadReplay(frames: FlightFrame[], name: string, selectMode = true): void {
   replayFrames = frames;
   replayName = name;
   playbackTimeS = frames[0]?.timeS ?? 0;
   replayPlaying = true;
   updatePlayButton();
   buildTrajectory(frames);
-  element<HTMLButtonElement>("open-analysis").disabled = frames.length < 2;
-  dispatch({ type: "select-replay", sourceName: name });
-  hideMessage();
+  if (selectMode) {
+    element<HTMLButtonElement>("open-analysis").disabled = frames.length < 2;
+    dispatch({ type: "select-replay", sourceName: name });
+    hideMessage();
+  }
 }
 
 function buildTrajectory(frames: readonly FlightFrame[]): void {
@@ -381,7 +394,10 @@ function buildTrajectory(frames: readonly FlightFrame[]): void {
 
 function setMode(next: "replay" | "live"): void {
   if (next === "live") dispatch({ type: "request-mcu" });
-  else dispatch({ type: "select-replay", sourceName: replayName });
+  else {
+    element<HTMLButtonElement>("open-analysis").disabled = replayFrames.length < 2;
+    dispatch({ type: "select-replay", sourceName: replayName });
+  }
 }
 
 function dispatch(message: AppMsg): void {
@@ -420,6 +436,7 @@ function connectLive(): void {
   disconnectLive();
   liveFrame = undefined;
   liveFrames = [];
+  liveReceiptBuffer = [];
   pilotInput.clear();
   element<HTMLButtonElement>("download-live").disabled = true;
   element<HTMLButtonElement>("open-analysis").disabled = true;
@@ -457,6 +474,7 @@ function connectLive(): void {
       });
       liveFrame = frameFromLive(message);
       liveFrames.push(liveFrame);
+      liveReceiptBuffer.push({ frame: liveFrame, receivedAtMs: performance.now() });
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
       element<HTMLButtonElement>("open-analysis").disabled = liveFrames.length < 2;
     } catch (error) {

@@ -16,10 +16,10 @@
           <h1>Birdman Flight Visualizer</h1>
         </div>
         <div class="status-cluster">
-          <span id="mode-badge" class="mode-badge">REPLAY</span>
+          <span id="mode-badge" class="mode-badge">INTERACTIVE / RP2040JS</span>
           <span id="phase-badge" class="phase-badge">READY</span>
-          <span id="connection-status" role="status">sample flight</span>
-          <span id="mcu-performance">MCU idle</span>
+          <span id="connection-status" role="status">loading actual UF2…</span>
+          <span id="mcu-performance">measuring host capacity</span>
         </div>
       </header>
 
@@ -72,13 +72,13 @@
 
       <section class="bottom-panel" aria-label="Simulation controls">
         <div class="mode-controls">
-          <button id="replay-mode" type="button" class="active">Replay</button>
-          <button id="live-mode" type="button">Interactive</button>
-          <button id="restart-live" type="button" hidden>Restart flight</button>
+          <button id="replay-mode" type="button">Replay</button>
+          <button id="live-mode" type="button" class="active">Interactive</button>
+          <button id="restart-live" type="button">Restart flight</button>
           <button id="open-analysis" type="button" disabled>Flight analysis</button>
         </div>
 
-        <div id="replay-controls" class="replay-controls">
+        <div id="replay-controls" class="replay-controls" hidden>
           <button id="play-pause" type="button" aria-label="Pause replay">Pause</button>
           <input id="timeline" type="range" min="0" max="1" step="0.001" value="0" aria-label="Replay timeline" />
           <select id="playback-speed" aria-label="Replay speed">
@@ -91,7 +91,7 @@
           <label class="file-control">Load CSV<input id="csv-file" type="file" accept=".csv,text/csv" /></label>
         </div>
 
-        <div id="live-controls" class="live-controls" hidden>
+        <div id="live-controls" class="live-controls">
           <label for="autonomy">Auto authority <strong id="autonomy-value">100%</strong></label>
           <input id="autonomy" type="range" min="0" max="100" step="1" value="100" />
           <span id="control-mode-label">FULL AUTO</span>

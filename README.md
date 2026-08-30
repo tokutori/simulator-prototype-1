@@ -127,6 +127,7 @@ docs/
   interactive-visualizer.md
   post-flight-analysis.md
   ui-scaling.md
+  completion-audit.md
   roadmap.md
 ```
 

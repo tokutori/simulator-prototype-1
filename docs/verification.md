@@ -65,8 +65,8 @@ Rustと同じAGLを与えた。簡易ground-effect誘導抗力補正も独立XML
 
 発進時pitch-rate damping 6水準 × AoA protection gain 6水準、計36 caseを8秒ずつ実行した。
 全caseで正の飛行経路角sampleと再浮上は0だったが、-3 degへ回復するまでの高度損失は
-4.78～6.72 mだった。現行値は5.01 mで、最小値との差は0.23 mに過ぎない。最小caseは
-最大迎角が17.13 degと現行の16.98 degより悪化するため、graphだけを良くするgain変更は
+4.85～7.53 mだった。現行値は5.10 mで、最小値との差は0.24 mに過ぎない。最小caseは
+最大迎角が16.71 degと現行の16.54 degより悪化するため、graphだけを良くするgain変更は
 採用しなかった。
 
 この結果は、2 m程度の降下後に引き起こす公開説明との差をcontroller gainだけで解決せず、
@@ -82,8 +82,8 @@ Rustと同じAGLを与えた。簡易ground-effect誘導抗力補正も独立XML
 
 pull-out開始/完了速度、launch AoA目標、look-aheadの135組も別に探索した。全caseで正の
 飛行経路角は0だった。従来の7.0～8.5 m/s、0.15 s先読みから6.0～7.5 m/s、0.10 sへ
-前倒しすると、最大迎角16.98 degを維持したまま高度損失を5.57 mから5.01 mへ減らせた。
-最小損失caseは5.00 mだが最大迎角17.22 degとなるため採用しなかった。結果は
+前倒しすると、最大迎角16.54 degで高度損失5.10 mとなった。
+最小損失caseは5.09 mだが最大迎角16.70 degとなるため採用しなかった。結果は
 [`evaluation/launch_strategy_sweep.py`](../evaluation/launch_strategy_sweep.py)と
 `reports/launch-strategy-sweep.png`へ出力する。
 
@@ -96,18 +96,35 @@ one-at-a-timeで変え、さらにadverse/favorable cornerを実行した。こ�
 
 | result | baseline | range across 17 cases | adverse corner |
 | --- | ---: | ---: | ---: |
-| altitude loss until -3 deg recovery | 5.01 m | 3.57–7.37 m | 7.37 m |
-| steepest downward flight path | -23.93 deg | -28.87～-19.35 deg | -28.87 deg |
-| maximum alpha | 16.98 deg | 14.09–19.86 deg | 19.86 deg |
+| altitude loss until -3 deg recovery | 5.09 m | 3.59–7.71 m | 7.71 m |
+| steepest downward flight path | -23.90 deg | -29.52～-19.32 deg | -29.52 deg |
+| maximum alpha | 16.73 deg | 13.77–19.67 deg | 19.67 deg |
 | time outside training aero table | 0 s | 0 s in every case | 0 s |
 | maximum re-ascent | 0 m | 0 m in every case | 0 m |
 
 再浮上防止logicは全caseで目的を満たした。一方、訓練用tableは公開BR式を20 degまで
-再構成しただけで、実測失速dataではない。adverse cornerは19.86 degと上限まで0.14 degしか
+再構成しただけで、実測失速dataではない。adverse cornerは19.67 degと上限まで0.33 degしか
 余裕がないため、高度損失の絶対値はvalidation結果ではない。ここでも最優先課題はcontroller
 再調整より実測nonlinear aero dataである。結果は
 [`evaluation/robustness_sweep.py`](../evaluation/robustness_sweep.py)、
 `reports/robustness-sweep.csv`、`reports/robustness-sweep.png`へ生成する。
+
+## Elevator command waveform
+
+旧profileでは、発進直後のtracking commandが約`-6.5 deg`から`+10 deg`へ0.1 s未満で
+反転していた。これは描画補間の問題ではなく、5 m/sで6 degの迎角を要求するlaunch tracking、
+迎角保護、pull-out scheduleが同時に切り替わり、PWM commandが実servoより速く動いていたためである。
+定常域の小振幅変動には、BNO055/AS5600の量子化後`pitch-alpha`とpitch-rate feedbackも含まれる。
+
+v0.9 controllerはtracking componentだけに15 msの一次整形を行い、trackingとenvelope protectionを
+合成した最終commandを`±10 deg`、`352.94 deg/s`へ制限する。このrateはsample actuatorの公開速度から
+置いたservo model上限と一致させた。alpha/climb protectionはtracking low-passを迂回するため、
+nominal graphだけを滑らかにして保護を遅らせない。変更後のnominal初回commandは`-2.58 deg`で、
+17 uncertainty caseでは再浮上、正の飛行経路角、aero table逸脱がいずれも0だった。
+
+これは未同定controllerを実機用に正当化する結果ではない。発進過渡は依然として最大約`-23.9 deg`で、
+公開説明の約2 m降下より大きい。command/actual surfaceの細かな変動をさらに減らす判断には、実機の
+pilot input、PWM、実舵角、pitch-rate、迎角を同期記録したflight logが必要である。
 
 ## Ground effect and deterministic gust stress
 

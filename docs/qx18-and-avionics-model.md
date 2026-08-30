@@ -46,6 +46,9 @@ pull-outをblendする。これらの高度値は再構成nominal軌道から選
 7.5 m/s以上かつ飛行経路角が-3 degまで回復した時点でglide phaseをlatchし、0.25 sかけて
 0.60 sへ移行する。これは100-caseの決定的gust sweepによるsoftware-test設定であり、
 実機同定済みgainではない。
+tracking commandには15 msの一次整形を入れ、envelope protectionとの合成後を`±10 deg`、
+`352.94 deg/s`へ制限する。保護項はtracking low-passを迂回する。これはPWM要求が実servo modelより
+速く反転していた問題へのsoftware-test上の対処であり、実機同定済みcommand shaperではない。
 また32 Hzのbarometric高度は、100 Hz loopで同じsampleをゼロ速度として繰り返し混ぜず、値が
 変化した時だけ経過時間で差分する。0.25 s filterと`-0.25 m/s`の対地barrierを使うが、
 pressure noise/transport delay未実装の決定的stress設定である。

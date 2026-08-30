@@ -230,6 +230,9 @@ pub struct ReferenceControllerFile {
     pub glide_pitch_rate_gain_s: f64,
     pub glide_damping_enable_flight_path_deg: f64,
     pub glide_damping_transition_time_s: f64,
+    pub automatic_elevator_limit_deg: f64,
+    pub automatic_elevator_rate_limit_deg_s: f64,
+    pub automatic_elevator_filter_time_constant_s: f64,
 }
 
 #[derive(Debug)]
@@ -270,7 +273,7 @@ impl LoadedSimulation {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = fs::read_to_string(path).map_err(ConfigError::Read)?;
         let file: SimulationFile = serde_json::from_str(&text).map_err(ConfigError::Parse)?;
-        if file.schema_version != "0.8.0" {
+        if file.schema_version != "0.9.0" {
             return Err(ConfigError::UnsupportedSchema(file.schema_version));
         }
         if [
@@ -542,6 +545,9 @@ fn validate_reference_controller(controller: &ReferenceControllerFile) -> Result
         || controller.glide_pitch_rate_gain_s < 0.0
         || controller.glide_damping_enable_flight_path_deg > 0.0
         || controller.glide_damping_transition_time_s <= 0.0
+        || controller.automatic_elevator_limit_deg <= 0.0
+        || controller.automatic_elevator_rate_limit_deg_s <= 0.0
+        || controller.automatic_elevator_filter_time_constant_s <= 0.0
         || controller.glide_target_flight_path_deg > controller.climb_limit_flight_path_deg
         || controller.climb_limit_flight_path_deg > 0.0
     {

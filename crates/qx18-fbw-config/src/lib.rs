@@ -38,4 +38,7 @@ pub const QX18_TRAINING_CONTROLLER: ControllerConfig = ControllerConfig {
     glide_pitch_rate_gain_s: 0.6,
     glide_damping_enable_flight_path_rad: -3.0 * PI / 180.0,
     glide_damping_transition_time_s: 0.25,
+    automatic_elevator_limit_rad: 10.0 * PI / 180.0,
+    automatic_elevator_rate_limit_rad_s: 352.941_2 * PI / 180.0,
+    automatic_elevator_filter_time_constant_s: 0.015,
 };

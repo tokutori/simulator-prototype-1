@@ -87,7 +87,7 @@ Inertiaは次のliteral tensor elementである。
 ## Aerodynamic contract
 
 longitudinal base coefficientは`alpha` tableから線形補間する。範囲外policyはmodel contract
-v0.8.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
+v0.9.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
 `aero-envelope-exit`で終了する。`clamp-and-flag`はsoftware test専用であり、endpoint保持に
 よって範囲外modelが妥当になるわけではない。どちらもvalidityをCSVとsummaryへ返す。
 

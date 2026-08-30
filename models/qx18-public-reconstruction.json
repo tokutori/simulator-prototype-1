@@ -1,8 +1,8 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.8.0",
+  "schema_version": "0.9.0",
   "metadata": {
-    "name": "QX-18-public-data-reconstruction-v0.8-strict",
+    "name": "QX-18-public-data-reconstruction-v0.9-strict",
     "provenance": "Real QX-18 geometry plus a fixed-revision public BR Simulator coefficient reconstruction and datasheet-based avionics profiles",
     "validation_status": "unvalidated-public-data-reconstruction",
     "valid_for": "Nominal rigid-body FBW software tests near the 9.7 m/s trim point and -5 to 8 deg angle of attack only",
@@ -231,6 +231,9 @@
     "launch_pitch_rate_gain_s": 0.05,
     "glide_pitch_rate_gain_s": 0.05,
     "glide_damping_enable_flight_path_deg": -3.0,
-    "glide_damping_transition_time_s": 0.25
+    "glide_damping_transition_time_s": 0.25,
+    "automatic_elevator_limit_deg": 10.0,
+    "automatic_elevator_rate_limit_deg_s": 352.9411765,
+    "automatic_elevator_filter_time_constant_s": 0.015
   }
 }

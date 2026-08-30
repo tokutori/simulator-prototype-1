@@ -52,6 +52,12 @@ pub struct ControllerConfig {
     pub glide_damping_enable_flight_path_rad: f32,
     /// First-order transition time from launch to glide pitch-rate damping.
     pub glide_damping_transition_time_s: f32,
+    /// Absolute limit applied to the automatic elevator demand before pilot blending.
+    pub automatic_elevator_limit_rad: f32,
+    /// Maximum automatic elevator-command slew rate.
+    pub automatic_elevator_rate_limit_rad_s: f32,
+    /// First-order automatic elevator-command conditioning time constant.
+    pub automatic_elevator_filter_time_constant_s: f32,
 }
 
 /// One synchronized set of measurements used by the controller.
@@ -99,6 +105,8 @@ pub struct ControllerState {
     filtered_vertical_speed_mps: f32,
     glide_damping_armed: bool,
     glide_damping_blend: f32,
+    previous_elevator_tracking_command_rad: Option<f32>,
+    previous_elevator_command_rad: Option<f32>,
 }
 
 impl ControllerState {
@@ -157,15 +165,66 @@ impl ControllerState {
             self.glide_damping_blend += response_fraction * (1.0 - self.glide_damping_blend);
         }
 
-        command_with_vertical_speed(
+        let unconditioned = command_with_vertical_speed(
             config,
             input,
             self.filtered_vertical_speed_mps,
             self.vertical_speed_estimate_valid,
             self.glide_damping_blend,
             (launch_barometric_altitude_m - input.barometric_altitude_m).max(0.0),
-        )
+        );
+        let target = unconditioned.tracking_command_rad.clamp(
+            -config.automatic_elevator_limit_rad,
+            config.automatic_elevator_limit_rad,
+        );
+        let previous = self
+            .previous_elevator_tracking_command_rad
+            .unwrap_or_else(|| {
+                config.launch_elevator_feedforward_rad.clamp(
+                    -config.automatic_elevator_limit_rad,
+                    config.automatic_elevator_limit_rad,
+                )
+            });
+        let valid_dt = dt_s.is_finite() && dt_s > 0.0;
+        let response_fraction = if valid_dt {
+            dt_s / (config.automatic_elevator_filter_time_constant_s + dt_s)
+        } else {
+            0.0
+        };
+        let filtered_target = previous + response_fraction * (target - previous);
+        self.previous_elevator_tracking_command_rad = Some(filtered_target);
+        // Envelope protection bypasses the tracking low-pass. Delaying a
+        // nose-down alpha/climb intervention made the uncertainty corner leave
+        // the aerodynamic table even though the nominal trace looked smoother.
+        // The combined command is still amplitude- and slew-limited below.
+        let mut output = unconditioned.output;
+        let target_command = (filtered_target + unconditioned.protection_command_rad).clamp(
+            -config.automatic_elevator_limit_rad,
+            config.automatic_elevator_limit_rad,
+        );
+        let previous_command = self.previous_elevator_command_rad.unwrap_or_else(|| {
+            config.launch_elevator_feedforward_rad.clamp(
+                -config.automatic_elevator_limit_rad,
+                config.automatic_elevator_limit_rad,
+            )
+        });
+        let maximum_delta = if valid_dt {
+            config.automatic_elevator_rate_limit_rad_s * dt_s
+        } else {
+            0.0
+        };
+        let command = previous_command
+            + (target_command - previous_command).clamp(-maximum_delta, maximum_delta);
+        self.previous_elevator_command_rad = Some(command);
+        output.elevator_command_rad = command;
+        output
     }
+}
+
+struct UnconditionedControllerOutput {
+    output: ControllerOutput,
+    tracking_command_rad: f32,
+    protection_command_rad: f32,
 }
 
 fn command_with_vertical_speed(
@@ -175,7 +234,7 @@ fn command_with_vertical_speed(
     vertical_speed_estimate_valid: bool,
     glide_damping_blend: f32,
     altitude_loss_m: f32,
-) -> ControllerOutput {
+) -> UnconditionedControllerOutput {
     let estimated_flight_path_rad = input.pitch_rad - input.alpha_rad;
     let flight_path_lookahead_s = if input.airspeed_valid {
         config.flight_path_lookahead_s
@@ -237,17 +296,19 @@ fn command_with_vertical_speed(
         + config.glide_pitch_rate_gain_s * glide_damping_blend;
     let pitch_rate_damping = pitch_rate_gain_s * input.pitch_rate_rad_s;
 
-    ControllerOutput {
-        elevator_command_rad: scheduled_command
-            + climb_suppression
-            + ground_climb_suppression
-            + alpha_protection
-            + pitch_rate_damping,
-        estimated_flight_path_rad,
-        estimated_vertical_speed_mps,
-        vertical_speed_estimate_valid,
-        pull_out_blend,
-        glide_damping_blend,
+    let tracking_command_rad = scheduled_command + pitch_rate_damping;
+    let protection_command_rad = climb_suppression + ground_climb_suppression + alpha_protection;
+    UnconditionedControllerOutput {
+        output: ControllerOutput {
+            elevator_command_rad: tracking_command_rad + protection_command_rad,
+            estimated_flight_path_rad,
+            estimated_vertical_speed_mps,
+            vertical_speed_estimate_valid,
+            pull_out_blend,
+            glide_damping_blend,
+        },
+        tracking_command_rad,
+        protection_command_rad,
     }
 }
 
@@ -284,6 +345,9 @@ mod tests {
             glide_pitch_rate_gain_s: 0.2,
             glide_damping_enable_flight_path_rad: -3.0_f32.to_radians(),
             glide_damping_transition_time_s: 0.25,
+            automatic_elevator_limit_rad: 10.0_f32.to_radians(),
+            automatic_elevator_rate_limit_rad_s: 60.0_f32.to_radians(),
+            automatic_elevator_filter_time_constant_s: 0.05,
         }
     }
 
@@ -359,12 +423,16 @@ mod tests {
 
     #[test]
     fn pitch_rate_damping_is_scheduled_from_launch_to_glide() {
+        let mut controller = config();
+        controller.automatic_elevator_rate_limit_rad_s = 10_000.0;
+        controller.automatic_elevator_filter_time_constant_s = 1.0e-6;
+        controller.flight_path_gain = 0.0;
         let mut launch = input(5.0, -1.0, 2.0);
-        launch.pitch_rate_rad_s = 0.2;
+        launch.pitch_rate_rad_s = 0.01;
         let mut glide = launch;
         glide.airspeed_mps = 9.0;
-        let launch_output = ControllerState::default().step(&config(), launch, 0.01);
-        let glide_output = ControllerState::default().step(&config(), glide, 0.01);
+        let launch_output = ControllerState::default().step(&controller, launch, 0.01);
+        let glide_output = ControllerState::default().step(&controller, glide, 0.01);
 
         assert_eq!(launch_output.pull_out_blend, 0.0);
         assert_eq!(glide_output.pull_out_blend, 1.0);
@@ -390,11 +458,14 @@ mod tests {
 
     #[test]
     fn invalid_airspeed_uses_longer_pitch_rate_prediction() {
+        let mut controller = config();
+        controller.automatic_elevator_rate_limit_rad_s = 10_000.0;
+        controller.automatic_elevator_filter_time_constant_s = 1.0e-6;
         let mut rising = input(5.0, -4.0, 2.0);
         rising.pitch_rate_rad_s = 0.1;
-        let valid = ControllerState::default().step(&config(), rising, 0.01);
+        let valid = ControllerState::default().step(&controller, rising, 0.01);
         rising.airspeed_valid = false;
-        let degraded = ControllerState::default().step(&config(), rising, 0.01);
+        let degraded = ControllerState::default().step(&controller, rising, 0.01);
 
         assert!(degraded.elevator_command_rad > valid.elevator_command_rad);
     }
@@ -410,5 +481,26 @@ mod tests {
 
         assert_eq!(launch.pull_out_blend, 0.0);
         assert_eq!(after_two_metres.pull_out_blend, 1.0);
+    }
+
+    #[test]
+    fn automatic_elevator_command_is_amplitude_and_slew_limited() {
+        let mut controller = config();
+        controller.climb_suppression_gain = 0.0;
+        controller.ground_climb_suppression_gain_rad_per_mps = 0.0;
+        controller.alpha_limit_gain = 0.0;
+        let mut state = ControllerState::default();
+        let mut steep = input(9.0, 25.0, 0.0);
+        steep.pitch_rate_rad_s = 1.0;
+
+        let first = state.step(&controller, steep, 0.01);
+        let second = state.step(&controller, steep, 0.01);
+
+        assert!((first.elevator_command_rad - 0.6_f32.to_radians()).abs() < 1.0e-6);
+        assert!((second.elevator_command_rad - 1.2_f32.to_radians()).abs() < 1.0e-6);
+        for _ in 0..30 {
+            let output = state.step(&controller, steep, 0.01);
+            assert!(output.elevator_command_rad <= 10.0_f32.to_radians());
+        }
     }
 }

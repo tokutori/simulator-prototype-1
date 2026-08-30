@@ -63,6 +63,11 @@ pub fn controller_config(file: &ReferenceControllerFile) -> ControllerConfig {
         glide_damping_enable_flight_path_rad: file.glide_damping_enable_flight_path_deg.to_radians()
             as f32,
         glide_damping_transition_time_s: file.glide_damping_transition_time_s as f32,
+        automatic_elevator_limit_rad: file.automatic_elevator_limit_deg.to_radians() as f32,
+        automatic_elevator_rate_limit_rad_s: file.automatic_elevator_rate_limit_deg_s.to_radians()
+            as f32,
+        automatic_elevator_filter_time_constant_s: file.automatic_elevator_filter_time_constant_s
+            as f32,
     }
 }
 
@@ -77,6 +82,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::too_many_lines)] // Exhaustive field-by-field firmware/model contract check.
     fn compiled_qx18_firmware_profile_matches_model_json() {
         let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../models/qx18-br-training-envelope.json");
@@ -159,6 +165,18 @@ mod tests {
             (
                 from_json.glide_damping_transition_time_s,
                 compiled.glide_damping_transition_time_s,
+            ),
+            (
+                from_json.automatic_elevator_limit_rad,
+                compiled.automatic_elevator_limit_rad,
+            ),
+            (
+                from_json.automatic_elevator_rate_limit_rad_s,
+                compiled.automatic_elevator_rate_limit_rad_s,
+            ),
+            (
+                from_json.automatic_elevator_filter_time_constant_s,
+                compiled.automatic_elevator_filter_time_constant_s,
             ),
         ];
         assert!(

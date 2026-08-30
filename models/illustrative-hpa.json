@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.8.0",
+  "schema_version": "0.9.0",
   "metadata": {
     "name": "illustrative-hpa-rigid-v0",
     "provenance": "Synthetic coefficients for software verification only; not derived from a real Birdman aircraft",
@@ -150,6 +150,9 @@
     "launch_pitch_rate_gain_s": 0.2,
     "glide_pitch_rate_gain_s": 0.2,
     "glide_damping_enable_flight_path_deg": -3.0,
-    "glide_damping_transition_time_s": 0.25
+    "glide_damping_transition_time_s": 0.25,
+    "automatic_elevator_limit_deg": 10.0,
+    "automatic_elevator_rate_limit_deg_s": 352.9411765,
+    "automatic_elevator_filter_time_constant_s": 0.015
   }
 }

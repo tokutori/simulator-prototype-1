@@ -1,8 +1,8 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.8.0",
+  "schema_version": "0.9.0",
   "metadata": {
-    "name": "QX-18-BR-training-envelope-v0.8",
+    "name": "QX-18-BR-training-envelope-v0.9",
     "provenance": "Real QX-18 geometry plus a fixed-revision BR Simulator behavior reconstruction and datasheet-based avionics profiles",
     "validation_status": "training-only-unvalidated-high-alpha-model",
     "valid_for": "FBW software stress tests reproducing the public BR Simulator's steady coefficient build-up from -12 to 20 deg; not stall prediction or safety validation",
@@ -103,6 +103,7 @@
       "Nominal sensor biases are zero; pitot coefficient is one and tubing dynamics are not identified",
       "The scenario starts at platform release at 5.0 m/s and a 3 degree downward flight path based on user-provided launch conditions",
       "The reference controller is a software test strategy, not a flight-test-identified QX-18 controller",
+      "The automatic elevator tracking component uses a 0.015 second first-order conditioner; envelope protection bypasses that filter, and the combined command is limited to 10 degrees and 352.9411765 degrees per second before PWM conversion",
       "Ground-climb feedback updates its altitude derivative only when the 32 Hz sample-and-hold barometric value changes, holds the estimate between samples and applies a 0.25 second filter; transport delay, weather pressure changes and pressure noise are not modeled",
       "The -0.25 m/s ground-climb barrier and 0.9 rad per m/s gain are deterministic gust-stress settings, not flight-identified handling-quality requirements",
       "With invalid airspeed, the 0.25 second path look-ahead and 0.75 through 2.0 m relative barometric altitude-loss blend are derived from the reconstructed nominal trajectory, not identified flight data",
@@ -247,6 +248,9 @@
     "launch_pitch_rate_gain_s": 0.05,
     "glide_pitch_rate_gain_s": 0.6,
     "glide_damping_enable_flight_path_deg": -3.0,
-    "glide_damping_transition_time_s": 0.25
+    "glide_damping_transition_time_s": 0.25,
+    "automatic_elevator_limit_deg": 10.0,
+    "automatic_elevator_rate_limit_deg_s": 352.9411765,
+    "automatic_elevator_filter_time_constant_s": 0.015
   }
 }

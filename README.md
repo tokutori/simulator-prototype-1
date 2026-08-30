@@ -92,9 +92,10 @@ npm.cmd run sample
 npm.cmd run dev
 ```
 
-`http://127.0.0.1:4173/`を開く。defaultはreplay、`Interactive`でRust FDMとのlive
-loopへ移る。keyboard 4 key、gamepad stick、gamepad buttonをelevator/rudderごとに
-選択でき、Auto authorityを0～100%で変更できる。詳細と制約は
+`http://127.0.0.1:4173/`を開く。defaultは`Interactive`で、production RP2040 UF2を
+rp2040jsで実行するlive loopへ直ちに入る。keyboard 4 key、gamepad stick、gamepad buttonを
+elevator/rudderごとに選択でき、Auto authorityを0～100%で変更できる。対応browser/headsetでは
+任意にWebXR cockpitへ入れる。詳細と制約は
 [interactive visualizer](docs/interactive-visualizer.md)を参照する。
 
 CLIの標準記録上限は120秒であり、nominal 10 m/sなら約1.2 kmを収容する。これは飛距離を

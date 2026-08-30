@@ -24,6 +24,7 @@ IDはrepository内で一意とし、完了条件が満たされるまで`done`�
 | SIM-018 | implemented | interactive first/third-person viewer | Three.js replay、actual-UF2 live bridge、keyboard/gamepad button/axis、manual/shared/auto log、TEA state。browser visual QAと実cockpit操作試験は継続 |
 | SIM-019 | implemented | production-UF2 pilot input/rudder path | ADC 3ch、button GPIO、I2C sensor、dual PWMをactual firmware/rp2040jsで閉loop化。実input hardware選定、電気fault、physical HILは継続 |
 | SIM-020 | done | rp2040js real-time monitor | processing ms、wall-clock ratio、lag、deadline missをtelemetry化し、性能不足をTEA warning stateで常時表示 |
+| SIM-021 | implemented | optional WebXR cockpit | Three.js公式VRButton、seated local reference space、head trackingを保持するaircraft rig、XR TEA state、非対応表示。実headset visual/comfort試験、XR HUD/controllerは継続 |
 
 `SIM-008`は`embedded-rust-playground`のUF2 load、`VTOR=0x10000100`、vector-tableのSP/PC、
 virtual I2C/PWM boundaryを参照した。BNO055/AS5600/SDP810/DPS310互換registerをactual

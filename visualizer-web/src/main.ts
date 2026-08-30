@@ -17,6 +17,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
+import { VRButton } from "three/addons/webxr/VRButton.js";
 
 import "./style.css";
 import { analysisStorageKey, prepareAnalysisDataset } from "./analysis-data.ts";
@@ -53,6 +54,13 @@ import type {
   PilotCommandMessage,
 } from "./types.ts";
 import { applyUiScale } from "./ui-scale.ts";
+import { resetXrRig, setXrCockpitRig } from "./xr-camera.ts";
+import {
+  presentXr,
+  updateXr,
+  type XrMsg,
+  type XrState,
+} from "./xr-state.ts";
 
 const settingsKey = "birdman-visualizer-input-v1";
 const livePresentationDelayMs = 30;
@@ -63,17 +71,24 @@ const renderer = new WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFSoftShadowMap;
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType("local");
 
 const scene = new Scene();
 scene.background = new Color(0x86b7cd);
 scene.fog = new Fog(0x86b7cd, 180, 950);
 const camera = new PerspectiveCamera(55, 1, 0.08, 1800);
+const xrRig = new Group();
+scene.add(xrRig);
+xrRig.add(camera);
 const aircraft = createAircraft();
 scene.add(aircraft.root);
 const environment = buildEnvironment(scene);
 
 let appState: AppState = { tag: "mcu-connecting" };
+let xrState: XrState = { tag: "checking" };
 let cameraMode: CameraMode = "chase";
+let cameraModeBeforeXr: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
 let liveFrames: FlightFrame[] = [];
@@ -92,6 +107,7 @@ const pilotInput = new PilotInput(settings);
 let captureBinding: { axis: "elevator" | "rudder"; polarity: "negative" | "positive" } | undefined;
 
 bindControls();
+initializeWebXr();
 syncSettingsForm();
 setCameraMode("chase");
 renderAppState();
@@ -156,13 +172,17 @@ function displayFrame(frame: FlightFrame, deltaS: number): void {
   aircraft.root.quaternion.copy(attitude);
   setControlSurfaces(aircraft, frame.elevatorRad, frame.rudderRad);
 
-  if (cameraMode === "cockpit") {
+  if (renderer.xr.isPresenting) {
+    setXrCockpitRig(xrRig, position, attitude);
+  } else if (cameraMode === "cockpit") {
+    resetXrRig(xrRig);
     const eye = new Vector3(0, 0.11, -1.18).applyQuaternion(attitude).add(position);
     camera.position.copy(eye);
     camera.quaternion.copy(attitude);
     camera.fov = 72;
     camera.updateProjectionMatrix();
   } else {
+    resetXrRig(xrRig);
     const forward = new Vector3(0, 0, -1).applyQuaternion(attitude);
     const horizontalForward = new Vector3(forward.x, 0, forward.z);
     if (horizontalForward.lengthSq() < 1e-8) {
@@ -184,6 +204,60 @@ function displayFrame(frame: FlightFrame, deltaS: number): void {
   }
   updateHud(frame);
   updateFlightPhase(frame);
+}
+
+function initializeWebXr(): void {
+  const vrButton = VRButton.createButton(renderer);
+  vrButton.classList.add("xr-button");
+  element("xr-controls").append(vrButton);
+  renderXrState();
+
+  renderer.xr.addEventListener("sessionstart", () => {
+    cameraModeBeforeXr = cameraMode;
+    setCameraMode("cockpit");
+    dispatchXr({ type: "session-started" });
+  });
+  renderer.xr.addEventListener("sessionend", () => {
+    resetXrRig(xrRig);
+    dispatchXr({ type: "session-ended" });
+    setCameraMode(cameraModeBeforeXr);
+  });
+
+  const xr = navigator.xr;
+  if (xr === undefined) {
+    dispatchXr({
+      type: "availability",
+      supported: false,
+      reason: window.isSecureContext ? "api-unavailable" : "insecure-context",
+    });
+    return;
+  }
+  void xr.isSessionSupported("immersive-vr").then((supported) => {
+    dispatchXr(supported
+      ? { type: "availability", supported: true }
+      : { type: "availability", supported: false, reason: "immersive-vr-unsupported" });
+  }).catch(() => dispatchXr({
+    type: "availability",
+    supported: false,
+    reason: "permission-denied",
+  }));
+}
+
+function dispatchXr(message: XrMsg): void {
+  xrState = updateXr(xrState, message);
+  renderXrState();
+}
+
+function renderXrState(): void {
+  const presentation = presentXr(xrState);
+  const status = element("xr-status");
+  status.textContent = presentation.label;
+  status.title = presentation.detail;
+  const vrButton = document.querySelector<HTMLElement>("#xr-controls > #VRButton");
+  vrButton?.classList.toggle("active", presentation.presenting);
+  vrButton?.setAttribute("aria-pressed", String(presentation.presenting));
+  element<HTMLButtonElement>("cockpit-camera").disabled = presentation.presenting;
+  element<HTMLButtonElement>("chase-camera").disabled = presentation.presenting;
 }
 
 interface FlightEnvironment {
@@ -502,6 +576,7 @@ function disconnectLive(): void {
 }
 
 function setCameraMode(next: CameraMode): void {
+  if (renderer.xr.isPresenting && next !== "cockpit") return;
   cameraMode = next;
   chaseInitialized = false;
   element<HTMLButtonElement>("cockpit-camera").setAttribute("aria-pressed", String(next === "cockpit"));

@@ -61,6 +61,32 @@ live plant sampleは100 Hzだが、WebSocket到着と60 Hz前後の描画frame�
 補間値は描画専用で、production UF2、sensor、servo、plant、保存flight logへfeedbackしない。
 最新sampleがbufferへ届かなければ最後のsampleを保持し、遅いemulationを外挿や時間伸縮で隠さない。
 
+## Optional WebXR cockpit
+
+対応browser/headsetで`ENTER VR`を選ぶと、Three.jsの公式`VRButton`と`WebXRManager`を使って
+stereoscopicなhead-tracked cockpit viewへ入る。flight、sensor、FBW、servoの経路は通常の
+Interactive表示と同じであり、VR用physicsやcontrollerへ切り替えない。`setAnimationLoop`を使用し、
+機体cockpit位置・姿勢をXR cameraの親rigへ与える。camera自体はWebXRに任せるため、頭の平行移動と
+回転を機体姿勢で上書きしない。座位体験としてreference spaceは`local`を使用する。
+
+XR session中はCockpitへ固定し、終了後は開始前のcamera modeへ戻す。WebXR availabilityは飛行の
+TEA stateとは独立した判別可能unionで`checking / unavailable / ready / presenting`を表し、
+非対応browser、HTTPS不足、capability check拒否を画面で区別する。
+
+現在の範囲は3D cockpitとhead trackingまでである。HTML HUDはheadset内へ合成せず、XR controllerも
+pilot入力へ割り当てない。操舵は引き続きkeyboard/gamepadからactual RP2040 UF2へ送る。tethered PC
+headsetから同一PCの`http://127.0.0.1:4173/`を開く構成を想定する。standalone headsetなど別端末から
+接続する場合、WebXRにはsecure contextが必要なので、HTTPS reverse proxy等を別途用意する必要がある。
+headset固有のFOV、酔い、cockpit eye point、frame rateは実deviceで未検証であり、training適合性を
+保証しない。
+
+実装根拠:
+
+- [Three.js VRButton](https://threejs.org/docs/pages/VRButton.html)
+- [Three.js: How to create VR content](https://threejs.org/manual/en/how-to-create-vr-content.html)
+- [Three.js WebXRManager](https://threejs.org/docs/pages/WebXRManager.html)
+- [Three.js: WebXR basics](https://threejs.org/manual/en/webxr-basics.html)
+
 ## Pilot input
 
 elevator/rudderそれぞれで次を独立に選べる。
@@ -144,5 +170,5 @@ npm.cmd run smoke:live
 ```
 
 testは座標変換、CSV補間、flight phase、flight clock、dead zone、
-button同時押し/neutral復帰、設定sanitizeを検証する。
+button同時押し/neutral復帰、設定sanitize、XR state遷移とcockpit rig座標を検証する。
 smoke testはHTTP sampleとWebSocket経由のmanual/shared/auto telemetryを確認する。

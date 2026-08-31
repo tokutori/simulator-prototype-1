@@ -57,20 +57,20 @@ defaultを50倍へ下げた。ただしこれはcycle accuracyの証拠ではな
 
 物理MCUをPCへ接続するHILでは、同じplant bridgeの外側adapterだけを交換し、少なくとも
 deadline、interrupt jitter、I²C timeout、watchdog、servo電源、level shifting、brownout、
-disconnect時の固定failsafe舵、sensor再初期化、watchdogを追加試験する。
+disconnect時の固定failsafe舵、SDA/SCL固着解除、sensor再初期化の実機成立を追加試験する。
 
 ## Result
 
-独立sensor clockへ更新したfull-flight nominal runは23.24秒で着水し、再浮上0、正飛行経路角sample 0、
-最大飛行経路角-1.19 degだった。native hostとのaltitude RMSE 0.0166 m、flight-path RMSE
-0.0478 deg、actual elevator RMSE 0.216 degである。これはbus/firmware integrationの整合であり、
+独立sensor clockとrecovery stateを使うfull-flight nominal runは23.19秒で着水し、再浮上0、
+正飛行経路角sample 0、最大飛行経路角-1.19 degだった。native hostとのaltitude RMSE 0.0106 m、
+flight-path RMSE 0.0445 deg、actual elevator RMSE 0.210 degである。これはbus/firmware integrationの整合であり、
 QX-18実機の軌道を約2 cmで当てるという意味ではない。
 
 比較plot: `reports/virtual-platform-comparison.png`。
 
 同じactual UF2へ0.5/1.0/2.0 m/sの決定的上昇gustを与えると、再浮上は
-0/0.018/0.139 m、最大飛行経路角は-0.58/0.33/1.64 degだった。gust区間の最大実舵角は
-2.76/5.30/9.91 degで、2 m/s caseは0.23秒飽和した。ただし舵角総変動は増えており、
+0/0.021/0.146 m、最大飛行経路角は-0.50/0.38/1.73 degだった。gust区間の最大実舵角は
+3.10/5.34/9.91 degで、2 m/s caseは0.26秒飽和した。ただし舵角総変動は増えており、
 再浮上防止を保証できる結果ではない。
 比較plotは`reports/virtual-platform-gust.png`。
 
@@ -85,8 +85,14 @@ GPIO21はarming/failsafe、GPIO18はdegradedを含むraw invalid、GPIO19はcont
 
 SDP CRC/NACKを1または3 update壊すとGPIO18は異常を示すがfailsafeは0で、再浮上も0だった。
 BNO status、AS5600 magnet、DPS readyを3 update壊すとfailsafe 1回、`invalid→failsafe`は
-2 update差（3回目）、`valid復帰→rearm`は19 update差（20回目）。7秒高度差はSDP CRC 0、
-SDP NACK +0.25 cm、control-critical 3種は+1.16 cmだった。比較plotは`reports/fault-injection.png`。
+2 update差（3回目）、`valid復帰→rearm`は19 update差（20回目）だった。7秒高度差はSDP faultで
++0.03～+0.14 cm、control-critical 3種で約-25.1 cmだった。
+
+critical readが4回連続すると、firmwareは離陸時pressure referenceを保持したまま100 ms backoff後に
+全deviceを再設定する。BNO055のCONFIGMODE→operation mode公式値7 msに対して20 msをnon-blockingで
+待つ。3-update status faultは再初期化0、operation modeを失わせる1-update `bno-reset`は再初期化1、
+0.5 s継続resetは再設定4回の後に復帰した。継続caseのraw invalidは0.60 s、failsafe/armingは0.77 s、
+再浮上とdeadline missは0だった。比較plotは`reports/fault-injection.png`。
 
 永続sensor lossについて、hold-last、固定0～3 degを6つの開始時刻で比較した。0 degは最大
 5.607 m、hold-lastは3.374 m再浮上し、固定0.50 degにも0.042 m残った。固定0.75/1.0/1.5 degは
@@ -110,7 +116,8 @@ DPS310公式datasheetの`MEAS_CFG.PRS_RDY`は新pressure resultを示し、press
 clearされる。virtual deviceは32 Hzでbitを生成し、pressure 3 byte readでclearする。firmwareは
 bitが0の100 Hz周期で直前pressureを最大20 read保持し、それを超えると異常にする。controllerも
 32 Hzのbarometric値が変化した時だけ鉛直速度を更新し、同一sampleの100 Hz反復をゼロ速度として
-混ぜない。40 updateの`dps-stale`固定試験は開始0.23 s後にfailsafeへ入り、20 valid updateで復帰した。
+混ぜない。40 updateの`dps-stale`固定試験は開始0.23 s後にfailsafeへ入り、再初期化2回、
+raw invalid 0.30 s、failsafe/arming 0.47 sを経て20 valid updateで復帰した。
 
 ## Datasheets
 

@@ -25,6 +25,7 @@ datasheetを区別して追跡します。実機挙動、飛距離、stall safet
 - native reference energy-management controllerによるclosed-loop smoke test
 - hostとRP2040 firmwareで同じ`#![no_std]` `fbw-control-core`を使用
 - 共有`#![no_std]` safety gateによるhold-last、model指定固定failsafe舵、rearm
+- critical sensorの4連続read失敗後に、離陸時気圧基準を保持してdeviceを再初期化する状態機械
 - 5 m/s補助発進caseのAoA→飛行経路角smooth transition、pitch-rate先読み、nominal再浮上防止
 - 32 Hz気圧高度のdistinct sampleだけを差分する対地鉛直速度filter、sink-rate barrier、glide damping
 - 誘導抗力への簡易ground-effect correlationと距離領域1−cos gust

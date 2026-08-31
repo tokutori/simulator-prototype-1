@@ -28,6 +28,10 @@ adapterはsensor別のcriticalityを決める。SDP810単独faultでは最後の
 raw-invalid診断を立てたまま他のsensorで制御を継続する。BNO055/AS5600/DPS310 faultは
 control-criticalとしてsafety gateへ`None`を渡す。
 
+firmwareのsensor lifecycleは`Active`、`Settling`、`RetryAfter`のenumで表し、未初期化なのに
+read可能、またはsettling中なのに正常sampleを返す組合せを作らない。`RetryAfter`は離陸時の
+pressure referenceだけを保持し、driver stateを作り直しても相対気圧高度の原点を変えない。
+
 Three.jsはhost visualization adapterであり、dependency directionへphysicsの逆流を
 作らない。
 

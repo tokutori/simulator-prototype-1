@@ -62,9 +62,22 @@ test('BNO055 exposes all FBW attitude and rate channels at 1/16 degree', () => {
   assert.deepEqual(readRegisters(device, 0x1a, 4), [64, 0, 48, 0]);
   assert.deepEqual(readRegisters(device, 0x1e, 2), [0xec, 0xff]);
   assert.deepEqual(readRegisters(device, 0x00, 1), [0xa0]);
+  device.startWrite();
+  device.writeByte(0x3d);
+  device.writeByte(0x0c);
+  assert.equal(device.configurationWriteCount, 1);
   assert.deepEqual(readRegisters(device, 0x39, 2), [0x05, 0x00]);
   device.update(observation(), 'bno-status');
   assert.deepEqual(readRegisters(device, 0x39, 2), [0x01, 0x09]);
+  device.update(observation(), 'bno-reset');
+  device.update(observation());
+  assert.deepEqual(readRegisters(device, 0x39, 2), [0x01, 0x09]);
+  device.startWrite();
+  device.writeByte(0x3d);
+  device.writeByte(0x0c);
+  device.update(observation());
+  assert.equal(device.configurationWriteCount, 2);
+  assert.deepEqual(readRegisters(device, 0x39, 2), [0x05, 0x00]);
 });
 
 test('AS5600 maps zero AoA to installation midpoint and wraps 12 bits', () => {

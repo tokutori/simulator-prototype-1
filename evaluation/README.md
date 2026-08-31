@@ -142,7 +142,7 @@ validation対象なので自動fitしない。詳細は[`docs/flight-validation.
 virtual BNO055/AS5600/SDP810/DPS310へ、plant時刻またはfirmware control-update数で
 決定的なstatus/CRC faultを入れる。control-critical sensorは1～2 updateでhold-last、3回目に
 model指定固定failsafe舵、20 valid update後に再armする。SDP810単独faultは最後のvalid
-airspeedを保持するdegraded modeとし、GPIO18のraw-invalidとGPIO17のfailsafeを分離して確認する。
+airspeedを保持するdegraded modeとし、GPIO18のraw-invalidとGPIO21のfailsafeを分離して確認する。
 加速したrp2040jsのwall/plant時間は性能値に使わず、状態遷移はcontrol-update差分で評価する。
 
 ```powershell
@@ -152,6 +152,16 @@ npm.cmd run simulate --prefix virtual-platform -- --steps 700 --timing-accelerat
   --summary reports\fault-update-bno-three.json
 & .\.eval-venv\Scripts\python.exe evaluation\fault_injection_plot.py `
   --reports reports --plot reports\fault-injection.png
+```
+
+3-update status faultは全deviceを再設定せず、operation modeを失うBNO resetだけが再初期化されることを
+actual UF2で区別する。0.5秒resetも故障解除後にrearmし、deadline missと再浮上がないことを検査する。
+
+```powershell
+& .\.eval-venv\Scripts\python.exe evaluation\sensor_recovery_check.py `
+  --transient reports\fault-update-bno-three.json `
+  --single-reset reports\fault-update-bno-reset.json `
+  --persistent-reset reports\recovery-bno-reset-persistent.json
 ```
 
 永続sensor loss時の固定舵角をhold-lastおよび0～3 deg（正=機首下げ）と比較する。

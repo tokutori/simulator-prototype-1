@@ -31,6 +31,7 @@ def main() -> None:
         "3-update SDP CRC": read_log(args.reports / "fault-update-sdp-three.csv"),
         "3-update SDP NACK": read_log(args.reports / "fault-update-sdp-nack-three.csv"),
         "3-update BNO status": read_log(args.reports / "fault-update-bno-three.csv"),
+        "1-update BNO reset": read_log(args.reports / "fault-update-bno-reset.csv"),
         "3-update AS5600 magnet": read_log(args.reports / "fault-update-as-three.csv"),
         "3-update DPS ready": read_log(args.reports / "fault-update-dps-three.csv"),
     }
@@ -72,6 +73,7 @@ def main() -> None:
         "3-update SDP CRC",
         "3-update SDP NACK",
         "3-update BNO status",
+        "1-update BNO reset",
         "3-update AS5600 magnet",
         "3-update DPS ready",
     ):

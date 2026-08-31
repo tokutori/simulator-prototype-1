@@ -183,11 +183,11 @@ DPS310静圧32 Hz、AS5600迎角100 Hzを独立clockにし、着水までの2317
 
 | quantity | RP2040 UF2 vs native host |
 | --- | ---: |
-| altitude RMSE | 0.0166 m |
-| final altitude difference | +0.0173 m |
-| flight-path RMSE | 0.0478 deg |
-| final flight-path difference | -0.0265 deg |
-| actual elevator RMSE | 0.216 deg |
+| altitude RMSE | 0.0106 m |
+| final altitude difference | +0.0055 m |
+| flight-path RMSE | 0.0445 deg |
+| final flight-path difference | -0.0131 deg |
+| actual elevator RMSE | 0.210 deg |
 | UF2 case maximum re-ascent | 0 m |
 | UF2 positive flight-path samples | 0 |
 
@@ -198,9 +198,9 @@ FDMと係数を使うので、これはfirmware integration verificationであ�
 MCU instruction timeは50倍加速しており、`timing_validated=false`をsummaryへ必ず出す。
 deadline、interrupt jitter、brownout、servo電流、配線/level shiftingはphysical HILで評価する。
 
-actual UF2の0.5/1/2 m/s上昇gustでは再浮上0/0.018/0.139 m、最大飛行経路角
--0.58/0.33/1.64 degだった。gust区間の最大実舵角は2.76/5.30/9.91 degで、
-2 m/s caseの余裕は約0.23 degである。従って「再浮上しない」ことは
+actual UF2の0.5/1/2 m/s上昇gustでは再浮上0/0.021/0.146 m、最大飛行経路角
+-0.50/0.38/1.73 degだった。gust区間の最大実舵角は3.10/5.34/9.91 degで、
+2 m/s caseは0.26 s飽和した。従って「再浮上しない」ことは
 nominal acceptanceであり、強い外乱に対する保証ではない。
 
 ## Actual-UF2 sensor fault and timing checks
@@ -216,20 +216,25 @@ DPS310 datasheetの`PRS_RDY`は新pressure resultを示し、pressure register r
 virtual deviceは32 Hzでbitを生成してpressure 3 byte readでclearし、firmwareはbitが0の100 Hz周期で
 直前pressureを最大20 read保持し、それを超えると異常にする。controllerもbarometric値が変化した
 時だけ鉛直速度を更新してsample-and-holdの誤微分を防ぐ。40 updateの`dps-stale`固定試験では
-開始0.23 s後、invalid 3回目でfailsafeへ入り、20 valid updateで復帰した。
+開始0.23 s後、invalid 3回目でfailsafeへ入った。4連続critical read失敗でdevice再初期化へ移り、
+100 ms backoff後に再設定する。BNO055のCONFIGMODE→operation modeは公式値7 msなので、再設定後は
+control loopをblockせず20 ms待ってからreadを再開する。離陸時の気圧基準は再初期化をまたいで保持する。
 
 | actual-UF2 case（t=3 s） | failsafe回数 | invalid→failsafe | recovery valid→rearm | 再浮上 | 7 s高度差対nominal |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| SDP CRC 1 update | 0 | - | - | 0 m | 0 m |
-| SDP CRC 3 update | 0 | - | - | 0 m | 0 m |
-| SDP I²C NACK 3 update | 0 | - | - | 0 m | +0.0025 m |
-| BNO status 3 update | 1 | 2 update差 | 19 update差 | 0 m | +0.0116 m |
-| AS5600 magnet 3 update | 1 | 2 update差 | 19 update差 | 0 m | +0.0116 m |
-| DPS ready 3 update | 1 | 2 update差 | 19 update差 | 0 m | +0.0116 m |
+| SDP CRC 1 update | 0 | - | - | 0 m | +0.0014 m |
+| SDP CRC 3 update | 0 | - | - | 0 m | +0.0003 m |
+| SDP I²C NACK 3 update | 0 | - | - | 0 m | +0.0003 m |
+| BNO status 3 update | 1 | 2 update差 | 19 update差 | 0 m | -0.2509 m |
+| BNO reset 1 update | 1 | 2 update差 | 19 update差 | 0 m | -0.2453 m |
+| AS5600 magnet 3 update | 1 | 2 update差 | 19 update差 | 0 m | -0.2509 m |
+| DPS ready 3 update | 1 | 2 update差 | 19 update差 | 0 m | -0.2509 m |
 
 差分は「3回目」「20回目」を表す。状態遷移はGPIO21（safety）、GPIO18（invalid）、
 GPIO19（control update）でfirmware control updateに同期して
-観測した。固定舵はこの仮モデルで小さい高度差に留まっただけで、安全証明ではない。
+観測した。3-updateの一過性critical faultは再初期化0、operation modeを失うBNO resetは1回だった。
+0.5 s継続resetでは再設定4回、raw invalid 0.60 s、failsafe/arming 0.77 sの後に復帰し、再浮上と
+deadline missは0だった。固定舵による約25 cmの余分な降下を含め、安全証明ではない。
 比較graphは`reports/fault-injection.png`。
 
 全control inputを失う場合のfailsafe commandを、0.5/1/2/3/5/7秒の開始時刻で12秒までsweepした。
@@ -316,7 +321,10 @@ cargo run -q -p sim-cli --bin sim-cli -- --model models\qx18-br-training-envelop
 npm.cmd run simulate --prefix virtual-platform -- --steps 2000 --timing-acceleration 50 --output reports\virtual-platform.csv
 & .\.eval-venv\Scripts\python.exe evaluation\virtual_platform_compare.py --host reports\native-shared-controller.csv --virtual reports\virtual-platform.csv --plot reports\virtual-platform-comparison.png --summary reports\virtual-platform-summary.json
 npm.cmd run simulate --prefix virtual-platform -- --steps 700 --sensor-fault sdp-crc --fault-start-s 3 --fault-duration-s 0 --fault-update-count 3 --output reports\fault-update-sdp-three.csv --summary reports\fault-update-sdp-three.json
+npm.cmd run simulate --prefix virtual-platform -- --steps 700 --sensor-fault bno-reset --fault-start-s 3 --fault-duration-s 0 --fault-update-count 1 --output reports\fault-update-bno-reset.csv --summary reports\fault-update-bno-reset.json
+npm.cmd run simulate --prefix virtual-platform -- --steps 800 --sensor-fault bno-reset --fault-start-s 3 --fault-duration-s 0.5 --output reports\recovery-bno-reset-persistent.csv --summary reports\recovery-bno-reset-persistent.json
 & .\.eval-venv\Scripts\python.exe evaluation\fault_injection_plot.py --reports reports --plot reports\fault-injection.png
+& .\.eval-venv\Scripts\python.exe evaluation\sensor_recovery_check.py --transient reports\fault-update-bno-three.json --single-reset reports\fault-update-bno-reset.json --persistent-reset reports\recovery-bno-reset-persistent.json
 cd visualizer-web
 npm.cmd install
 npm.cmd run sample

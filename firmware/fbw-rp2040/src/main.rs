@@ -5,7 +5,12 @@ mod sensors;
 
 use core::f32::consts::PI;
 use cortex_m_rt::entry;
-use embedded_hal::{delay::DelayNs, digital::{InputPin, OutputPin}, pwm::SetDutyCycle};
+use embedded_hal::{
+    delay::DelayNs,
+    digital::{InputPin, OutputPin},
+    i2c::I2c,
+    pwm::SetDutyCycle,
+};
 use fbw_control_core::{ControllerInput, ControllerState};
 use fbw_input_core::{ButtonPair, RawPilotInput, blend, decode};
 use fbw_safety_core::{SafetyConfig, SafetyMode, SafetyState};
@@ -13,7 +18,7 @@ use fugit::RateExtU32;
 use panic_halt as _;
 use qx18_fbw_config::{QX18_FAILSAFE_ELEVATOR_RAD, QX18_TRAINING_CONTROLLER};
 use rp2040_hal::{self as hal, Clock};
-use sensors::SensorState;
+use sensors::{MeasurementFrame, SensorState};
 
 #[unsafe(link_section = ".boot2")]
 #[used]
@@ -26,13 +31,137 @@ const SERVO_PWM_TOP: u16 = 19_999;
 const SERVO_CENTER_US: f32 = 1_500.0;
 const SERVO_US_PER_RAD: f32 = 500.0 / (10.0 * PI / 180.0);
 const SURFACE_LIMIT_RAD: f32 = 10.0 * PI / 180.0;
-const SENSOR_RETRY_SAMPLES: u16 = 100;
+const SENSOR_REINITIALIZE_AFTER_FAILURES: u8 = 4;
+const SENSOR_RETRY_SAMPLES: u16 = 10;
+const SENSOR_SETTLE_SAMPLES: u16 = 1;
 const SAFETY_CONFIG: SafetyConfig = SafetyConfig {
     startup_valid_samples: 10,
     hold_invalid_samples: 2,
     recovery_valid_samples: 20,
     failsafe_command_rad: QX18_FAILSAFE_ELEVATOR_RAD,
 };
+
+enum SensorRuntime {
+    Active {
+        state: SensorState,
+        consecutive_failures: u8,
+    },
+    Settling {
+        state: SensorState,
+        samples_remaining: u16,
+    },
+    RetryAfter {
+        retained_launch_pressure_pa: Option<f32>,
+        samples_remaining: u16,
+    },
+}
+
+enum SensorPoll {
+    Measurement(MeasurementFrame),
+    Unavailable,
+}
+
+impl SensorRuntime {
+    fn initialize<I: I2c>(i2c: &mut I) -> Self {
+        match SensorState::initialize(i2c, None) {
+            Ok(state) => Self::Active {
+                state,
+                consecutive_failures: 0,
+            },
+            Err(_) => Self::RetryAfter {
+                retained_launch_pressure_pa: None,
+                samples_remaining: SENSOR_RETRY_SAMPLES,
+            },
+        }
+    }
+
+    fn poll<I: I2c>(&mut self, i2c: &mut I) -> SensorPoll {
+        let previous = core::mem::replace(
+            self,
+            Self::RetryAfter {
+                retained_launch_pressure_pa: None,
+                samples_remaining: SENSOR_RETRY_SAMPLES,
+            },
+        );
+        match previous {
+            Self::Active {
+                mut state,
+                consecutive_failures,
+            } => {
+                let retained_launch_pressure_pa = state.launch_pressure_pa();
+                match state.read(i2c) {
+                    Ok(frame) => {
+                        *self = Self::Active {
+                            state,
+                            consecutive_failures: 0,
+                        };
+                        SensorPoll::Measurement(frame)
+                    }
+                    Err(_) => {
+                        let failures = consecutive_failures.saturating_add(1);
+                        *self = if failures >= SENSOR_REINITIALIZE_AFTER_FAILURES {
+                            Self::RetryAfter {
+                                retained_launch_pressure_pa,
+                                samples_remaining: SENSOR_RETRY_SAMPLES,
+                            }
+                        } else {
+                            Self::Active {
+                                state,
+                                consecutive_failures: failures,
+                            }
+                        };
+                        SensorPoll::Unavailable
+                    }
+                }
+            }
+            Self::Settling {
+                state,
+                samples_remaining,
+            } => {
+                *self = if samples_remaining > 1 {
+                    Self::Settling {
+                        state,
+                        samples_remaining: samples_remaining - 1,
+                    }
+                } else {
+                    Self::Active {
+                        state,
+                        consecutive_failures: 0,
+                    }
+                };
+                SensorPoll::Unavailable
+            }
+            Self::RetryAfter {
+                retained_launch_pressure_pa,
+                mut samples_remaining,
+            } => {
+                if samples_remaining > 1 {
+                    samples_remaining -= 1;
+                    *self = Self::RetryAfter {
+                        retained_launch_pressure_pa,
+                        samples_remaining,
+                    };
+                    return SensorPoll::Unavailable;
+                }
+                match SensorState::initialize(i2c, retained_launch_pressure_pa) {
+                    Ok(state) => {
+                        *self = Self::Settling {
+                            state,
+                            samples_remaining: SENSOR_SETTLE_SAMPLES,
+                        };
+                    }
+                    Err(_) => {
+                        *self = Self::RetryAfter {
+                            retained_launch_pressure_pa,
+                            samples_remaining: SENSOR_RETRY_SAMPLES,
+                        };
+                    }
+                }
+                SensorPoll::Unavailable
+            }
+        }
+    }
+}
 
 #[entry]
 fn main() -> ! {
@@ -103,8 +232,7 @@ fn main() -> ! {
     let mut safety = SafetyState::default();
     // BNO055 specifies 650 ms from reset to configuration mode.
     timer.delay_ms(650);
-    let mut sensor_state = SensorState::initialize(&mut i2c).ok();
-    let mut sensor_retry_samples = SENSOR_RETRY_SAMPLES;
+    let mut sensor_runtime = SensorRuntime::initialize(&mut i2c);
     // Covers BNO055 operation-mode transition and first SDP810/DPS310 samples.
     timer.delay_ms(20);
 
@@ -116,23 +244,13 @@ fn main() -> ! {
         } else {
             let _ = control_tick.set_low();
         }
-        if sensor_state.is_none() {
-            if sensor_retry_samples == 0 {
-                sensor_state = SensorState::initialize(&mut i2c).ok();
-                sensor_retry_samples = SENSOR_RETRY_SAMPLES;
-                if sensor_state.is_some() {
-                    timer.delay_ms(20);
-                }
-            } else {
-                sensor_retry_samples -= 1;
-            }
-        }
         if safety.controller_should_start_clean() {
             controller = ControllerState::default();
         }
-        let measurement_frame = sensor_state
-            .as_mut()
-            .and_then(|state| state.read(&mut i2c).ok());
+        let measurement_frame = match sensor_runtime.poll(&mut i2c) {
+            SensorPoll::Measurement(frame) => Some(frame),
+            SensorPoll::Unavailable => None,
+        };
         let all_sensors_valid = measurement_frame
             .as_ref()
             .is_some_and(|frame| frame.all_sensors_valid);

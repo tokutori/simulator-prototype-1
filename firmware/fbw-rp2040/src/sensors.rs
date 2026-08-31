@@ -95,7 +95,10 @@ pub struct SensorState {
 }
 
 impl SensorState {
-    pub fn initialize<I: I2c>(i2c: &mut I) -> Result<Self, SensorError<I::Error>> {
+    pub fn initialize<I: I2c>(
+        i2c: &mut I,
+        retained_launch_pressure_pa: Option<f32>,
+    ) -> Result<Self, SensorError<I::Error>> {
         let mut chip_id = [0_u8; 1];
         i2c.write_read(BNO055_ADDRESS, &[BNO055_CHIP_ID], &mut chip_id)
             .map_err(SensorError::Bus)?;
@@ -140,11 +143,15 @@ impl SensorState {
             .map_err(SensorError::Bus)?;
         Ok(Self {
             dps310: decode_dps310_coefficients(coefficients),
-            launch_pressure_pa: None,
+            launch_pressure_pa: retained_launch_pressure_pa,
             last_pressure_pa: None,
             pressure_hold_reads: 0,
             last_airspeed_mps: None,
         })
+    }
+
+    pub const fn launch_pressure_pa(&self) -> Option<f32> {
+        self.launch_pressure_pa
     }
 
     pub fn read<I: I2c>(&mut self, i2c: &mut I) -> Result<MeasurementFrame, SensorError<I::Error>> {

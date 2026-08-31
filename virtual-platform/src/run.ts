@@ -30,7 +30,7 @@ Options:
   --steps COUNT              maximum plant steps
   --timing-acceleration N    MCU clock acceleration; timing is not validated
   --gust-{north,east,down}-mps V
-  --sensor-fault KIND        none, bno-status, as5600-magnet, sdp-crc, sdp-nack, dps-stale, dps-not-ready
+  --sensor-fault KIND        none, bno-status, bno-reset, as5600-magnet, sdp-crc, sdp-nack, dps-stale, dps-not-ready
   --fault-start-s SECONDS    fault start in simulated plant time
   --fault-duration-s SECONDS fault duration
   --fault-update-count COUNT exact consecutive firmware control updates; overrides duration
@@ -228,6 +228,7 @@ async function main(): Promise<void> {
       `i2c=${i2cTrace.join(',')}`,
     );
   }
+  const preflightBnoConfigurationWrites = bno.configurationWriteCount;
   // Preflight runs against a frozen plant; release-time metrics start at zero.
   controlUpdateCount = 0;
   deadlineMissActivationCount = 0;
@@ -306,6 +307,8 @@ async function main(): Promise<void> {
       update_count: args.faultUpdateCount,
       updates_injected: faultUpdatesInjected,
     },
+    sensor_reinitializations_observed:
+      bno.configurationWriteCount - preflightBnoConfigurationWrites,
     failsafe_activation_count: failsafeActivationCount,
     first_failsafe_time_s: firstFailsafeTimeS,
     failsafe_entry_latency_s: firstFailsafeTimeS === null || args.sensorFault === 'none'
@@ -381,7 +384,7 @@ function parseArgs(values: string[]) {
     throw new Error('gust components must be finite');
   }
   const sensorFaults: SensorFaultKind[] = [
-    'none', 'bno-status', 'as5600-magnet', 'sdp-crc', 'sdp-nack', 'dps-stale', 'dps-not-ready',
+    'none', 'bno-status', 'bno-reset', 'as5600-magnet', 'sdp-crc', 'sdp-nack', 'dps-stale', 'dps-not-ready',
   ];
   if (!sensorFaults.includes(result.sensorFault)) throw new Error(`unknown --sensor-fault: ${result.sensorFault}`);
   if (!Number.isFinite(result.faultStartS) || result.faultStartS < 0) {

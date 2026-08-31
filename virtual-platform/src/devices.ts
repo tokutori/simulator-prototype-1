@@ -31,6 +31,7 @@ export interface I2cDevice {
 export type SensorFaultKind =
   | 'none'
   | 'bno-status'
+  | 'bno-reset'
   | 'as5600-magnet'
   | 'sdp-crc'
   | 'sdp-nack'
@@ -71,6 +72,8 @@ abstract class RegisterDevice implements I2cDevice {
 
 export class Bno055Device extends RegisterDevice {
   private readonly registers = new Uint8Array(256);
+  private operationMode = 0;
+  private configurationWrites = 0;
 
   constructor() {
     super(0x28);
@@ -92,8 +95,16 @@ export class Bno055Device extends RegisterDevice {
     putI16Le(this.registers, 0x1a, headingRaw);
     putI16Le(this.registers, 0x1c, rollRaw);
     putI16Le(this.registers, 0x1e, pitchRaw);
-    this.registers[0x39] = fault === 'bno-status' ? 0x01 : 0x05;
-    this.registers[0x3a] = fault === 'bno-status' ? 0x09 : 0x00;
+    if (fault === 'bno-reset') this.operationMode = 0;
+    const fusionRunning = this.operationMode === 0x0c
+      && fault !== 'bno-status'
+      && fault !== 'bno-reset';
+    this.registers[0x39] = fusionRunning ? 0x05 : 0x01;
+    this.registers[0x3a] = fusionRunning ? 0x00 : 0x09;
+  }
+
+  get configurationWriteCount(): number {
+    return this.configurationWrites;
   }
 
   protected readRegister(register: number): number {
@@ -102,6 +113,12 @@ export class Bno055Device extends RegisterDevice {
 
   protected writeRegister(register: number, value: number): void {
     this.registers[register] = value;
+    if (register === 0x3d) {
+      this.operationMode = value;
+      if (value === 0x0c) this.configurationWrites += 1;
+      this.registers[0x39] = value === 0x0c ? 0x05 : 0x01;
+      this.registers[0x3a] = value === 0x0c ? 0x00 : 0x09;
+    }
   }
 }
 

@@ -21,9 +21,9 @@ QX-18 training modelの高迎角係数、安定微係数、慣性、負荷時ser
 | 公開simulator・論文・実装・datasheetの調査 | complete for stated public cutoff | 隣接`simulator-search`の`research.md`、`sources.md`、`evidence.csv`、機体・電装・launch/control資料に分離 |
 | 独立Git repository | complete | `simulator1/.git`で管理し、親`tokutori/`をrepositoryにしていない |
 | pure/no_std-friendly FDM | implemented | `flight-dynamics-core`はI/O・allocationなし、固定step RK4、quaternion、FRD/NED nonlinear 6DoF |
-| 設計班aero dataとのcontract | implemented | schema v0.9、reference geometry/point、係数table、valid range、環境・controller profileをmachine-readable化 |
+| 設計班aero dataとのcontract | implemented | schema v0.10、reference geometry/point、係数table、valid range、環境・controller・独立sensor clockをmachine-readable化 |
 | 公開機体sample | implemented with limitations | 公開QX-18/BR情報をstrict modelとtraining envelopeに分離。高迎角側は実測値ではない |
-| sensor/servo datasheet model | implemented subset | BNO055、AS5600、SDP810、DPS310、KRS-4034HVのregister/CRC/ready/量子化/PWM/rateを実装。電気noise、配線、負荷電流等は未実装 |
+| sensor/servo datasheet model | implemented subset | BNO055、AS5600、SDP810、DPS310、KRS-4034HVの独立sample clock、register/CRC/ready/量子化/PWM/rateを実装。電気noise、配線、負荷電流等は未実装 |
 | actual production RP2040 firmware | complete for virtual platform | production UF2をactual rp2040jsへload。host controller fallbackを拒否し、virtual ADC/GPIO/I2Cとdual PWMを通す |
 | manual/shared/automatic control | implemented | keyboard/gamepad button/axis、0～100% authority、pilot/automatic/mixed/actual surfaceを別々に記録 |
 | TEA and impossible-state modeling | implemented | replay/connecting/running/too-slow/ended/failedとXR availabilityを判別可能union、pure update/presentationで表現 |
@@ -42,25 +42,25 @@ QX-18 training modelの高迎角係数、安定微係数、慣性、負荷時ser
 
 | Result | Host shared controller | Production UF2 on rp2040js |
 | --- | ---: | ---: |
-| water contact | 23.09 s | 23.10 s |
-| final north range | 232.04 m | 232.11 m |
-| maximum flight-path angle | -1.20 deg | -1.14 deg |
+| water contact | 23.17 s | 23.24 s |
+| final north range | 232.50 m | 233.07 m |
+| maximum flight-path angle | -1.24 deg | -1.19 deg |
 | positive flight-path samples | 0 | 0 |
 | maximum re-ascent | 0 m | 0 m |
-| maximum angle of attack | 16.73 deg | — |
-| observed firmware control updates | — | 2307 |
+| maximum angle of attack | 16.69 deg | — |
+| observed firmware control updates | — | 2321 |
 | firmware deadline misses in accelerated batch | — | 0 |
 
-Hostとactual-UF2 runの比較はaltitude RMSE 0.0100 m、flight-path RMSE 0.0479 deg、actual elevator
-RMSE 0.2328 degだった。これはsoftware path equivalenceであってreal-aircraft accuracyではない。
+Hostとactual-UF2 runの比較はaltitude RMSE 0.0166 m、flight-path RMSE 0.0478 deg、actual elevator
+RMSE 0.2160 degだった。これはsoftware path equivalenceであってreal-aircraft accuracyではない。
 
 現行制御は再浮上を生じないが、公開される約2 m降下後の定常滑空像よりpull-out高度損失が大きい。
 最大迎角もtraining table上限20 degに近い。実測logなしにgainや係数を調整して軌跡だけ合わせることは
 しない。優先入力は発進直後のairspeed/alpha/pitch/q/実舵角、質量・慣性・CG、負荷時servo response、
 wing/tail-boom modeである。
 
-Interactive actual-UF2 smokeでは80 telemetryを受けた。このPCで最大平均処理時間5.86 ms/update、
-最小real-time ratio 0.81、最大lag 177.2 ms、non-real-time 31 sampleを観測した。この結果は性能不足を
+Interactive actual-UF2 smokeでは80 telemetryを受けた。このPCで最大平均処理時間4.50 ms/update、
+最小real-time ratio 0.74、最大lag 268.9 ms、non-real-time 34 sampleを観測した。この結果は性能不足を
 画面に明示すべきcaseであり、rp2040jsのcycle timing validationには用いない。
 
 ## Verification rerun
@@ -68,13 +68,14 @@ Interactive actual-UF2 smokeでは80 telemetryを受けた。このPCで最大�
 2026-08-31に次を成功させた。
 
 - `cargo fmt --all --check`
-- `cargo test --workspace`: 47 unit/scenario test + 1 doc test
+- `cargo test --workspace`: 48 unit/scenario test + 1 doc test
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - production firmware `thumbv6m-none-eabi --release` build
+- AJV Draft 2020-12でmodel contract 3件をschema validation
 - `virtual-platform`: TypeScript check、5 tests、high-severity audit 0
 - `visualizer-web`: TypeScript check、29 tests、production build、high-severity audit 0
 - actual-UF2 interactive HTTP/WebSocket smoke: 80 observations
-- actual-UF2 23.10 s batch flight and host comparison
+- actual-UF2 23.24 s batch flight and host comparison
 
 Vite production buildにはsingle JavaScript chunkが500 kBを超えるperformance warningが残る。
 機能・正しさのfailureではないが、network配布を行う段階ではanalysis pageやThree.jsのcode splittingを

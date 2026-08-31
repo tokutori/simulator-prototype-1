@@ -77,9 +77,9 @@ KRS-4034HV ICS、BNO055、DPS310、SDP810-500Paの採用を確認した。これ
 | --- | --- | --- | --- |
 | Kondo KRS-4034HV ICS | 11.1 Vで0.17 s/60 deg、最大270 deg | [公式製品仕様](https://kondo-robot.com/product/krs-4034hv-ics) | QX-18舵角±10 deg、最大速度352.94 deg/s。lag/deadband/command量子化は仮定 |
 | Bosch BNO055 | fusion mode 100 Hz、Euler 1/16 deg、gyro 1/16 deg/s、accel 0.01 m/s² | [datasheet rev.1.8](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf) | 100 Hz sample-and-hold、量子化、明示bias。fusion algorithm内部誤差は未model |
-| Sensirion SDP810-500Pa | ±500 Pa、16 bit、scale factor 60 counts/Pa、step response τ63 < 3 ms | [datasheet v1.1](https://sensirion.com/file/datasheet_sdp800-d/) | 1/60 Pa量子化、3 ms一次遅れ、±500 Pa飽和、32 Hz読出し |
+| Sensirion SDP810-500Pa | ±500 Pa、16 bit、scale factor 60 counts/Pa、step response τ63 < 3 ms、continuous内部更新0.5 ms | [datasheet v1.1](https://sensirion.com/file/datasheet_sdp800-d/) | `0x3615` average-till-read、1/60 Pa量子化、3 ms一次遅れ、±500 Pa飽和、firmware polling相当100 Hz。0.5 ms resultのread間平均は10 ms plant stepで個別積分していない |
 | Infineon DPS310 | 1～128 Hz、data resolution 0.06 Pa、standard precision 0.35 Pa RMS | [datasheet v1.2](https://www.infineon.com/dgdl/Infineon-DPS310-DataSheet-v01_02-EN.pdf?fileId=5546d462576f34750157750826c42242) | 鳥科実装に合わせ32 Hz、0.06 Pa量子化、ISA換算高度 |
-| ams AS5600 | I²C 0x36、12 bit/360 deg、RAW ANGLE 0x0C～0x0D | [datasheet v1.06](https://look.ams-osram.com/m/7059eac7531a86fd/original/AS5600-DS000365.pdf) | AoA vaneの試作用profile。鳥科搭載実績を示すものではなく、取付zero/リンクageは未同定 |
+| ams AS5600 | I²C 0x36、12 bit/360 deg、RAW ANGLE 0x0C～0x0D、既定slow-filter step response 2.2 ms | [datasheet v1.06](https://look.ams-osram.com/m/7059eac7531a86fd/original/AS5600-DS000365.pdf) | firmware polling相当100 Hz AoA。鳥科搭載実績を示すものではなく、取付zero/linkage、filter transient/noiseは未同定 |
 
 BNO055は実績を再現するためのprofileであり、新規実機の部品選定を推奨する意味ではない。
 また、BNO055の融合姿勢をそのままFBWへ使うなら、校正状態、磁気外乱、axis remap、起動時間、
@@ -88,7 +88,8 @@ BNO055は実績を再現するためのprofileであり、新規実機の部品�
 ## 現在のvalidation境界
 
 このsampleで確認できるのは、公開値から組んだnominal rigid-body plantに対するcontroller、
-sample-and-hold、量子化、pressure response、servo rate/lag/deadbandのsoftware挙動である。
+IMU/差圧/静圧/迎角を分離したsample-and-hold、量子化、pressure response、servo
+rate/lag/deadbandのsoftware挙動である。
 QX-18の実飛行軌道、stall、強いgust、ground effect、構造柔軟性、安全性は予測しない。
 5.0 m/s発進caseをstrict modelへ与えると0.10 sで上限8 degを超え、
 `aero-envelope-exit`で停止する。従来の8 deg endpoint保持では-3 degへ戻るまで4.52 m、

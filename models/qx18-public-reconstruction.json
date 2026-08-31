@@ -1,8 +1,8 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.9.0",
+  "schema_version": "0.10.0",
   "metadata": {
-    "name": "QX-18-public-data-reconstruction-v0.9-strict",
+    "name": "QX-18-public-data-reconstruction-v0.10-strict",
     "provenance": "Real QX-18 geometry plus a fixed-revision public BR Simulator coefficient reconstruction and datasheet-based avionics profiles",
     "validation_status": "unvalidated-public-data-reconstruction",
     "valid_for": "Nominal rigid-body FBW software tests near the 9.7 m/s trim point and -5 to 8 deg angle of attack only",
@@ -50,6 +50,12 @@
         "authority": "Infineon DPS310 datasheet version 1.2"
       },
       {
+        "id": "as5600-official",
+        "url": "https://look.ams-osram.com/m/7059eac7531a86fd/original/AS5600-DS000365.pdf",
+        "applies_to": "Angle-of-attack encoder resolution and default-filter response",
+        "authority": "ams AS5600 datasheet version 1.06"
+      },
+      {
         "id": "setsunan-launch-sequence",
         "url": "https://setsunan.repo.nii.ac.jp/records/1270",
         "applies_to": "Reference-controller launch, acceleration-dive and pull-out phase concept",
@@ -94,6 +100,7 @@
       "Servo time constant, deadband and command resolution are explicit engineering assumptions because the manufacturer does not specify them",
       "Nominal sensor biases are zero; datasheet accuracy limits belong in later Monte Carlo uncertainty cases",
       "Pitot coefficient is one and tubing dynamics beyond the SDP810 response are not identified",
+      "The 100 Hz differential-pressure and angle clocks represent the production firmware polling rate; SDP810 internal updates are faster and AS5600 default-filter step response is about 2.2 ms",
       "Ground-climb feedback updates only for distinct 32 Hz barometric samples; its -0.25 m/s barrier is a deterministic stress setting rather than a flight-identified requirement",
       "Invalid-airspeed altitude-loss blending is referenced to the simulated release altitude and is not flight-identified",
       "The strict scenario starts at the analytic 9.698 m/s steady glide and terminates if angle of attack leaves the -5 through 8 degree table",
@@ -177,7 +184,8 @@
       "acceleration_resolution_mps2": 0.01
     },
     "air_data": {
-      "sample_rate_hz": 32.0,
+      "differential_pressure_sample_rate_hz": 100.0,
+      "static_pressure_sample_rate_hz": 32.0,
       "differential_pressure_range_pa": 500.0,
       "differential_pressure_resolution_pa": 0.0166666667,
       "differential_pressure_bias_pa": 0.0,
@@ -186,6 +194,7 @@
       "static_pressure_resolution_pa": 0.06,
       "static_pressure_bias_pa": 0.0
     },
+    "alpha_sample_rate_hz": 100.0,
     "alpha_bias_deg": 0.0,
     "alpha_resolution_deg": 0.1
   },

@@ -20,7 +20,7 @@ datasheetを区別して追跡します。実機挙動、飛距離、stall safet
 - `Ixz`を含むsymmetric inertia tensor
 - elevator/rudderのtravel、rate、first-order lag、deadband、command量子化
 - BNO055相当100 Hz IMU sample-and-hold・register量子化
-- SDP810-500Pa相当のrange・pressure量子化・response、DPS310相当32 Hz barometer
+- SDP810-500Pa相当のrange・pressure量子化・responseと100 Hz polling、DPS310相当32 Hz barometer、AS5600相当100 Hz AoA
 - strict JSON model loaderとCSV logger
 - native reference energy-management controllerによるclosed-loop smoke test
 - hostとRP2040 firmwareで同じ`#![no_std]` `fbw-control-core`を使用

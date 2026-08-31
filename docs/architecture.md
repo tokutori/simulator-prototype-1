@@ -87,7 +87,7 @@ Inertiaは次のliteral tensor elementである。
 ## Aerodynamic contract
 
 longitudinal base coefficientは`alpha` tableから線形補間する。範囲外policyはmodel contract
-v0.9.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
+v0.10.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
 `aero-envelope-exit`で終了する。`clamp-and-flag`はsoftware test専用であり、endpoint保持に
 よって範囲外modelが妥当になるわけではない。どちらもvalidityをCSVとsummaryへ返す。
 
@@ -111,7 +111,7 @@ ground effectはmodelごとに無効化できる。現在は
 
 - fixed time step
 - hidden global stateなし
-- sensor random noiseなし。sample period、量子化、bias、pressure responseは明示state
+- sensor random noiseなし。IMU/差圧/静圧/迎角の独立sample clock、量子化、bias、pressure responseは明示state
 - servo stateはcallerが所有
 - f64 arithmeticとtable順序を固定
 

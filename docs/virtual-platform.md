@@ -61,16 +61,16 @@ disconnect時の固定failsafe舵、sensor再初期化、watchdogを追加試験
 
 ## Result
 
-20秒nominal runは再浮上0、正飛行経路角sample 0、最大飛行経路角-1.23 degだった。native
-hostとのaltitude RMSE 0.0290 m、flight-path RMSE 0.0513 deg、actual elevator RMSE
-0.267 degである。
-これはbus/firmware integrationの整合であり、QX-18実機の軌道を約3 cmで当てるという意味ではない。
+独立sensor clockへ更新したfull-flight nominal runは23.24秒で着水し、再浮上0、正飛行経路角sample 0、
+最大飛行経路角-1.19 degだった。native hostとのaltitude RMSE 0.0166 m、flight-path RMSE
+0.0478 deg、actual elevator RMSE 0.216 degである。これはbus/firmware integrationの整合であり、
+QX-18実機の軌道を約2 cmで当てるという意味ではない。
 
 比較plot: `reports/virtual-platform-comparison.png`。
 
 同じactual UF2へ0.5/1.0/2.0 m/sの決定的上昇gustを与えると、再浮上は
-0/0.029/0.186 m、最大飛行経路角は-0.43/0.50/2.10 degだった。gust区間の最大実舵角は
-3.11/5.46/9.77 degで、2 m/s caseの余裕は約0.23 degである。ただし舵角総変動は増えており、
+0/0.018/0.139 m、最大飛行経路角は-0.58/0.33/1.64 degだった。gust区間の最大実舵角は
+2.76/5.30/9.91 degで、2 m/s caseは0.23秒飽和した。ただし舵角総変動は増えており、
 再浮上防止を保証できる結果ではない。
 比較plotは`reports/virtual-platform-gust.png`。
 

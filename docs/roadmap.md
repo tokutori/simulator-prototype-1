@@ -5,12 +5,12 @@ IDはrepository内で一意とし、完了条件が満たされるまで`done`�
 | ID | Status | Work | Completion criteria |
 | --- | --- | --- | --- |
 | SIM-001 | done | no_std rigid 6DoF core | unit test、RK4、quaternion、FRD/NED contract |
-| SIM-002 | done | JSON aircraft contract v0.9 | strict parse、model validation、schema、sample status、table外policy、environment/controller/failsafe/degraded-air-data/command-conditioning profile |
+| SIM-002 | done | JSON aircraft contract v0.10 | strict parse、model validation、schema、sample status、table外policy、environment/controller/failsafe/degraded-air-data/command-conditioning/独立sensor-clock profile |
 | SIM-003 | done | servo/sensor/native closed loop | rate/lag/limit test、CSV smoke run |
 | SIM-004 | done | steady-glide trim、4-state longitudinal linearization、host固有値解析 | trim residual test、QX-18 mode regression、PNG/CSV report |
 | SIM-005 | implemented | JSBSim independent comparison | 同一dataset/inputの5秒replay差をreport |
 | SIM-006 | implemented | gust and ground effect | 誘導抗力簡易式、1−cos pulse、unit test、environment sweep。実機validity rangeは未同定 |
-| SIM-007 | partial | sensor timing and faults | status/CRC、4-device fault、I²C NACK、固定failsafe反証、SDP単独degraded modeを実装。transport delay、noise、bus固着、再初期化が残る |
+| SIM-007 | partial | sensor timing and faults | IMU/差圧/静圧/迎角の独立clock、status/CRC、4-device fault、I²C NACK、固定failsafe反証、SDP単独degraded modeを実装。未同定transport delay/noise、bus固着、再初期化が残る |
 | SIM-012 | done | public QX-18/electronics sample | 固定source、仮定、valid range、datasheet profileをJSONと文書で追跡 |
 | SIM-013 | implemented | deterministic model-uncertainty stress cases | 範囲の由来を明示し、全caseをCSV/PNG化。実機同定後に範囲を更新 |
 | SIM-014 | implemented | aerodynamic-envelope boundary test | strict停止、legacy endpoint保持、BR訓練用再構成をCSV/PNG比較 |

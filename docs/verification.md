@@ -129,22 +129,22 @@ pilot input、PWM、実舵角、pitch-rate、迎角を同期記録したflight l
 ## Ground effect and deterministic gust stress
 
 ground effectはBR Simulatorと同形の`h/b` correlationを誘導抗力成分だけに適用した。
-free-airと比較すると20秒時点の高度は0.836 mから0.912 mとなり、nominal再浮上はどちらも0。
-これは約7.2 cmの差を予測精度として主張する結果ではなく、簡易式が限定的な方向へ作用し、
+free-airと比較すると20秒時点の高度は0.797 mから0.810 mとなり、nominal再浮上はどちらも0。
+これは約1.2 cmの差を予測精度として主張する結果ではなく、簡易式が限定的な方向へ作用し、
 controller回帰を壊さないことの確認である。
 
 距離60～100 mにfull 1−cos wind pulseを与えた。上昇gustで`pitch-alpha`だけを使う旧制御は、
 0.5/1/2 m/sで0.312/1.176/2.972 m再上昇した。32 Hz sample-and-hold気圧高度が変化した時だけ
 経過時間で差分し、sample間は推定値を保持するよう修正した。0.25 s filter、
 `-0.25 m/s`の対地barrier、0.9 rad/(m/s) feedback、回復後0.6 s pitch-rate dampingでは
-0/0.027/0.157 mとなった。一方、下降gust 0.5/1/2 m/sでは19.71/15.84/9.29 sで接水した。
+0/0.031/0.167 mとなった。一方、下降gust 0.5/1/2 m/sでは19.61/15.54/9.24 sで接水した。
 従って外乱時の再上昇0を
 保証せず、再上昇量、接水時間、舵角飽和、迎角marginを同時に評価する。
 
 対地barrier 5水準、gain 3水準、filter 4水準の60 caseを2 m/s上昇gustで探索した。
-現行`-0.25 m/s`、0.9、0.25 sはhost上で再浮上0.157 m、gust舵角総変動102.8 deg、
-nominal舵角総変動68.2 degだった。filter 0.10 sは再浮上0.070 mへ減るが、gust/nominalの
-総変動を112.6/78.9 degへ増やすため採用しなかった。発進中に高いdampingを掛けると通常軌道の
+現行`-0.25 m/s`、0.9、0.25 sはhost上で再浮上0.167 m、gust舵角総変動112.0 deg、
+nominal舵角総変動66.8 degだった。filter 0.10 sは再浮上0.113 mへ減るが、gust/nominalの
+総変動を134.6/78.9 degへ増やすため採用しなかった。発進中に高いdampingを掛けると通常軌道の
 高度損失が増えたため、7.5 m/s以上かつ-3 degまで回復した時点でglide dampingをlatchし、
 0.25 sで移行する。これは実機用gainの決定ではなく、未validation plantに対するstress設定である。
 
@@ -178,15 +178,16 @@ endpoint保持はBR訓練用再構成より0.48 m少ない高度損失を返し�
 ## Actual-UF2 virtual-platform comparison
 
 host adapterとRP2040 firmwareは同じ`fbw-control-core`を使うが、後者はBNO055等のregister
-量子化、I²C transaction、SDP CRC、servo PWMの経路を通る。20秒、2000 sampleを比較した。
+量子化、I²C transaction、SDP CRC、servo PWMの経路を通る。v0.10ではSDP810差圧100 Hz、
+DPS310静圧32 Hz、AS5600迎角100 Hzを独立clockにし、着水までの2317 matched sampleを比較した。
 
 | quantity | RP2040 UF2 vs native host |
 | --- | ---: |
-| altitude RMSE | 0.0290 m |
-| final altitude difference | -0.0476 m |
-| flight-path RMSE | 0.0513 deg |
-| final flight-path difference | -0.0065 deg |
-| actual elevator RMSE | 0.267 deg |
+| altitude RMSE | 0.0166 m |
+| final altitude difference | +0.0173 m |
+| flight-path RMSE | 0.0478 deg |
+| final flight-path difference | -0.0265 deg |
+| actual elevator RMSE | 0.216 deg |
 | UF2 case maximum re-ascent | 0 m |
 | UF2 positive flight-path samples | 0 |
 
@@ -197,8 +198,8 @@ FDMと係数を使うので、これはfirmware integration verificationであ�
 MCU instruction timeは50倍加速しており、`timing_validated=false`をsummaryへ必ず出す。
 deadline、interrupt jitter、brownout、servo電流、配線/level shiftingはphysical HILで評価する。
 
-actual UF2の0.5/1/2 m/s上昇gustでは再浮上0/0.029/0.186 m、最大飛行経路角
--0.43/0.50/2.10 degだった。gust区間の最大実舵角は3.11/5.46/9.77 degで、
+actual UF2の0.5/1/2 m/s上昇gustでは再浮上0/0.018/0.139 m、最大飛行経路角
+-0.58/0.33/1.64 degだった。gust区間の最大実舵角は2.76/5.30/9.91 degで、
 2 m/s caseの余裕は約0.23 degである。従って「再浮上しない」ことは
 nominal acceptanceであり、強い外乱に対する保証ではない。
 

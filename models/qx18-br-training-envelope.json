@@ -1,8 +1,8 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.9.0",
+  "schema_version": "0.10.0",
   "metadata": {
-    "name": "QX-18-BR-training-envelope-v0.9",
+    "name": "QX-18-BR-training-envelope-v0.10",
     "provenance": "Real QX-18 geometry plus a fixed-revision BR Simulator behavior reconstruction and datasheet-based avionics profiles",
     "validation_status": "training-only-unvalidated-high-alpha-model",
     "valid_for": "FBW software stress tests reproducing the public BR Simulator's steady coefficient build-up from -12 to 20 deg; not stall prediction or safety validation",
@@ -48,6 +48,12 @@
         "url": "https://www.infineon.com/dgdl/Infineon-DPS310-DataSheet-v01_02-EN.pdf?fileId=5546d462576f34750157750826c42242",
         "applies_to": "Static pressure rate and resolution",
         "authority": "Infineon DPS310 datasheet version 1.2"
+      },
+      {
+        "id": "as5600-official",
+        "url": "https://look.ams-osram.com/m/7059eac7531a86fd/original/AS5600-DS000365.pdf",
+        "applies_to": "Angle-of-attack encoder resolution and default-filter response",
+        "authority": "ams AS5600 datasheet version 1.06"
       },
       {
         "id": "setsunan-launch-sequence",
@@ -101,6 +107,7 @@
       "A one-to-one KRS-4034HV linkage is assumed; actual QX-18 actuator dynamics are not public",
       "Servo lag, deadband and command resolution are explicit engineering assumptions",
       "Nominal sensor biases are zero; pitot coefficient is one and tubing dynamics are not identified",
+      "The 100 Hz differential-pressure and angle clocks represent the production firmware polling rate; SDP810 internal updates are faster and AS5600 default-filter step response is about 2.2 ms",
       "The scenario starts at platform release at 5.0 m/s and a 3 degree downward flight path based on user-provided launch conditions",
       "The reference controller is a software test strategy, not a flight-test-identified QX-18 controller",
       "The automatic elevator tracking component uses a 0.015 second first-order conditioner; envelope protection bypasses that filter, and the combined command is limited to 10 degrees and 352.9411765 degrees per second before PWM conversion",
@@ -194,7 +201,8 @@
       "acceleration_resolution_mps2": 0.01
     },
     "air_data": {
-      "sample_rate_hz": 32.0,
+      "differential_pressure_sample_rate_hz": 100.0,
+      "static_pressure_sample_rate_hz": 32.0,
       "differential_pressure_range_pa": 500.0,
       "differential_pressure_resolution_pa": 0.0166666667,
       "differential_pressure_bias_pa": 0.0,
@@ -203,6 +211,7 @@
       "static_pressure_resolution_pa": 0.06,
       "static_pressure_bias_pa": 0.0
     },
+    "alpha_sample_rate_hz": 100.0,
     "alpha_bias_deg": 0.0,
     "alpha_resolution_deg": 0.1
   },

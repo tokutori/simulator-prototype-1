@@ -12,8 +12,12 @@ const PRESSURE_EXPONENT: f64 = 5.255_879_7;
 pub struct SensorModel {
     /// BNO055 fusion-mode output period.
     pub imu_sample_period_s: f64,
-    /// Air-data acquisition period.
-    pub air_data_sample_period_s: f64,
+    /// SDP810 differential-pressure register acquisition period.
+    pub differential_pressure_sample_period_s: f64,
+    /// DPS310 absolute-pressure register acquisition period.
+    pub static_pressure_sample_period_s: f64,
+    /// AS5600 angle-of-attack register acquisition period.
+    pub alpha_sample_period_s: f64,
     /// Constant gyroscope bias in body axes.
     pub gyro_bias_rad_s: Vec3,
     /// Gyroscope register quantum.
@@ -74,12 +78,60 @@ pub struct SensorSample {
     pub alpha_rad: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SampleClockState {
+    Initial,
+    Running { elapsed_s: f64 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SampleClock {
+    period_s: f64,
+    state: SampleClockState,
+}
+
+impl SampleClock {
+    const fn new(period_s: f64) -> Self {
+        Self {
+            period_s,
+            state: SampleClockState::Initial,
+        }
+    }
+
+    fn advance(&mut self, dt_s: f64) -> bool {
+        match self.state {
+            SampleClockState::Initial => {
+                self.state = SampleClockState::Running { elapsed_s: 0.0 };
+                true
+            }
+            SampleClockState::Running { elapsed_s } => {
+                let mut next_elapsed_s = elapsed_s + dt_s;
+                if next_elapsed_s + f64::EPSILON < self.period_s {
+                    self.state = SampleClockState::Running {
+                        elapsed_s: next_elapsed_s,
+                    };
+                    return false;
+                }
+                while next_elapsed_s + f64::EPSILON >= self.period_s {
+                    next_elapsed_s = (next_elapsed_s - self.period_s).max(0.0);
+                }
+                self.state = SampleClockState::Running {
+                    elapsed_s: next_elapsed_s,
+                };
+                true
+            }
+        }
+    }
+}
+
 /// Explicit state for deterministic sensor replay.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SensorSuite {
     model: SensorModel,
-    imu_elapsed_s: f64,
-    air_data_elapsed_s: f64,
+    imu_clock: SampleClock,
+    differential_pressure_clock: SampleClock,
+    static_pressure_clock: SampleClock,
+    alpha_clock: SampleClock,
     filtered_differential_pressure_pa: f64,
     differential_pressure_initialized: bool,
     sample: SensorSample,
@@ -96,8 +148,12 @@ impl SensorSuite {
         validate_model(model)?;
         Ok(Self {
             model,
-            imu_elapsed_s: model.imu_sample_period_s,
-            air_data_elapsed_s: model.air_data_sample_period_s,
+            imu_clock: SampleClock::new(model.imu_sample_period_s),
+            differential_pressure_clock: SampleClock::new(
+                model.differential_pressure_sample_period_s,
+            ),
+            static_pressure_clock: SampleClock::new(model.static_pressure_sample_period_s),
+            alpha_clock: SampleClock::new(model.alpha_sample_period_s),
             filtered_differential_pressure_pa: 0.0,
             differential_pressure_initialized: false,
             sample: SensorSample::default(),
@@ -143,20 +199,20 @@ impl SensorSuite {
             self.differential_pressure_initialized = true;
         }
 
-        self.imu_elapsed_s += dt_s;
-        if self.imu_elapsed_s + f64::EPSILON >= self.model.imu_sample_period_s {
-            while self.imu_elapsed_s >= self.model.imu_sample_period_s {
-                self.imu_elapsed_s -= self.model.imu_sample_period_s;
-            }
+        if self.imu_clock.advance(dt_s) {
             self.capture_imu(state, loads, mass_kg);
         }
 
-        self.air_data_elapsed_s += dt_s;
-        if self.air_data_elapsed_s + f64::EPSILON >= self.model.air_data_sample_period_s {
-            while self.air_data_elapsed_s >= self.model.air_data_sample_period_s {
-                self.air_data_elapsed_s -= self.model.air_data_sample_period_s;
-            }
-            self.capture_air_data(state, loads, environment);
+        if self.differential_pressure_clock.advance(dt_s) {
+            self.capture_differential_pressure(environment);
+        }
+
+        if self.static_pressure_clock.advance(dt_s) {
+            self.capture_static_pressure(state);
+        }
+
+        if self.alpha_clock.advance(dt_s) {
+            self.capture_alpha(loads);
         }
         Ok(self.sample)
     }
@@ -176,12 +232,7 @@ impl SensorSuite {
         );
     }
 
-    fn capture_air_data(
-        &mut self,
-        state: RigidBodyState,
-        loads: AeroLoads,
-        environment: Environment,
-    ) {
+    fn capture_differential_pressure(&mut self, environment: Environment) {
         let biased_dp =
             self.filtered_differential_pressure_pa + self.model.differential_pressure_bias_pa;
         self.sample.differential_pressure_pa = quantize(
@@ -195,12 +246,17 @@ impl SensorSuite {
         self.sample.airspeed_mps = libm::sqrt(
             2.0 * nonnegative_dp / (environment.density_kg_m3 * self.model.pitot_coefficient),
         );
+    }
 
+    fn capture_static_pressure(&mut self, state: RigidBodyState) {
         let altitude_m = -state.position_ned_m.z;
         let static_pressure =
             pressure_from_altitude(altitude_m) + self.model.static_pressure_bias_pa;
         let measured_pressure = quantize(static_pressure, self.model.static_pressure_resolution_pa);
         self.sample.barometric_altitude_m = altitude_from_pressure(measured_pressure);
+    }
+
+    fn capture_alpha(&mut self, loads: AeroLoads) {
         self.sample.alpha_rad = quantize(
             loads.condition.alpha_rad + self.model.alpha_bias_rad,
             self.model.alpha_resolution_rad,
@@ -211,7 +267,9 @@ impl SensorSuite {
 fn validate_model(model: SensorModel) -> Result<(), SensorError> {
     let positive = [
         model.imu_sample_period_s,
-        model.air_data_sample_period_s,
+        model.differential_pressure_sample_period_s,
+        model.static_pressure_sample_period_s,
+        model.alpha_sample_period_s,
         model.gyro_resolution_rad_s,
         model.euler_resolution_rad,
         model.acceleration_resolution_mps2,
@@ -273,7 +331,9 @@ mod tests {
     fn model() -> SensorModel {
         SensorModel {
             imu_sample_period_s: 0.01,
-            air_data_sample_period_s: 0.04,
+            differential_pressure_sample_period_s: 0.02,
+            static_pressure_sample_period_s: 0.04,
+            alpha_sample_period_s: 0.03,
             gyro_bias_rad_s: Vec3::new(0.001, 0.0, 0.0),
             gyro_resolution_rad_s: 0.001,
             euler_resolution_rad: 0.001,
@@ -291,8 +351,8 @@ mod tests {
     }
 
     #[test]
-    fn air_data_is_sampled_and_held_at_its_own_rate() {
-        let state = RigidBodyState {
+    fn air_data_channels_are_sampled_and_held_on_independent_clocks() {
+        let initial_state = RigidBodyState {
             position_ned_m: Vec3::new(0.0, 0.0, -10.0),
             velocity_body_mps: Vec3::new(10.0, 0.0, 0.0),
             attitude_body_to_ned: Quaternion::IDENTITY,
@@ -314,21 +374,43 @@ mod tests {
         };
         let mut suite = SensorSuite::new(model()).expect("valid model");
         let initial = suite
-            .step(state, loads, environment, 10.0, 0.01)
+            .step(initial_state, loads, environment, 10.0, 0.01)
             .expect("valid sample");
         loads.condition.dynamic_pressure_pa = 200.0;
+        loads.condition.alpha_rad = 0.2;
+        let changed_state = RigidBodyState {
+            position_ned_m: Vec3::new(0.0, 0.0, -20.0),
+            ..initial_state
+        };
         let held = suite
-            .step(state, loads, environment, 10.0, 0.01)
+            .step(changed_state, loads, environment, 10.0, 0.01)
             .expect("valid sample");
-        assert_eq!(
-            held.differential_pressure_pa,
-            initial.differential_pressure_pa
+        assert_eq!(held, initial);
+
+        let differential_pressure_updated = suite
+            .step(changed_state, loads, environment, 10.0, 0.01)
+            .expect("valid sample");
+        assert!(
+            differential_pressure_updated.differential_pressure_pa > held.differential_pressure_pa
         );
-        for _ in 0..3 {
-            suite
-                .step(state, loads, environment, 10.0, 0.01)
-                .expect("valid sample");
-        }
-        assert!(suite.sample.differential_pressure_pa > held.differential_pressure_pa);
+        assert_eq!(
+            differential_pressure_updated.barometric_altitude_m,
+            held.barometric_altitude_m
+        );
+        assert_eq!(differential_pressure_updated.alpha_rad, held.alpha_rad);
+
+        let alpha_updated = suite
+            .step(changed_state, loads, environment, 10.0, 0.01)
+            .expect("valid sample");
+        assert!(alpha_updated.alpha_rad > held.alpha_rad);
+        assert_eq!(
+            alpha_updated.barometric_altitude_m,
+            held.barometric_altitude_m
+        );
+
+        let static_pressure_updated = suite
+            .step(changed_state, loads, environment, 10.0, 0.01)
+            .expect("valid sample");
+        assert!(static_pressure_updated.barometric_altitude_m > 19.9);
     }
 }

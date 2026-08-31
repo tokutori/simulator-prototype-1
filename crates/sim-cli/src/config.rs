@@ -7,6 +7,7 @@ use flight_dynamics_core::{
 use serde::Deserialize;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+const SUPPORTED_SCHEMA_VERSION: &str = "0.10.0";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -148,6 +149,7 @@ pub struct ActuatorFile {
 pub struct SensorsFile {
     pub imu: ImuFile,
     pub air_data: AirDataFile,
+    pub alpha_sample_rate_hz: f64,
     pub alpha_bias_deg: f64,
     pub alpha_resolution_deg: f64,
 }
@@ -165,7 +167,8 @@ pub struct ImuFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AirDataFile {
-    pub sample_rate_hz: f64,
+    pub differential_pressure_sample_rate_hz: f64,
+    pub static_pressure_sample_rate_hz: f64,
     pub differential_pressure_range_pa: f64,
     pub differential_pressure_resolution_pa: f64,
     pub differential_pressure_bias_pa: f64,
@@ -273,7 +276,7 @@ impl LoadedSimulation {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = fs::read_to_string(path).map_err(ConfigError::Read)?;
         let file: SimulationFile = serde_json::from_str(&text).map_err(ConfigError::Parse)?;
-        if file.schema_version != "0.9.0" {
+        if file.schema_version != SUPPORTED_SCHEMA_VERSION {
             return Err(ConfigError::UnsupportedSchema(file.schema_version));
         }
         if [
@@ -403,7 +406,10 @@ impl LoadedSimulation {
         let air_data = &sensors.air_data;
         SensorModel {
             imu_sample_period_s: 1.0 / imu.sample_rate_hz,
-            air_data_sample_period_s: 1.0 / air_data.sample_rate_hz,
+            differential_pressure_sample_period_s: 1.0
+                / air_data.differential_pressure_sample_rate_hz,
+            static_pressure_sample_period_s: 1.0 / air_data.static_pressure_sample_rate_hz,
+            alpha_sample_period_s: 1.0 / sensors.alpha_sample_rate_hz,
             gyro_bias_rad_s: array_to_vec3(imu.gyro_bias_deg_s) * DEG_TO_RAD,
             gyro_resolution_rad_s: imu.gyro_resolution_deg_s * DEG_TO_RAD,
             euler_resolution_rad: imu.euler_resolution_deg * DEG_TO_RAD,
@@ -496,11 +502,13 @@ fn validate_scenario(file: &SimulationFile) -> Result<(), ConfigError> {
         file.reference_controller.glide_damping_transition_time_s,
         file.sensors.alpha_bias_deg,
         file.sensors.alpha_resolution_deg,
+        file.sensors.alpha_sample_rate_hz,
         file.sensors.imu.sample_rate_hz,
         file.sensors.imu.gyro_resolution_deg_s,
         file.sensors.imu.euler_resolution_deg,
         file.sensors.imu.acceleration_resolution_mps2,
-        file.sensors.air_data.sample_rate_hz,
+        file.sensors.air_data.differential_pressure_sample_rate_hz,
+        file.sensors.air_data.static_pressure_sample_rate_hz,
         file.sensors.air_data.differential_pressure_range_pa,
         file.sensors.air_data.differential_pressure_resolution_pa,
         file.sensors.air_data.differential_pressure_bias_pa,
@@ -586,12 +594,32 @@ pub const fn rad_to_deg(value: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::one_minus_cosine_shape;
+    use std::path::Path;
+
+    use super::{LoadedSimulation, one_minus_cosine_shape};
 
     #[test]
     fn full_one_minus_cosine_pulse_has_zero_endpoints_and_unit_peak() {
         assert!(one_minus_cosine_shape(0.0).abs() < 1.0e-12);
         assert!((one_minus_cosine_shape(0.5) - 1.0).abs() < 1.0e-12);
         assert!(one_minus_cosine_shape(1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn every_repository_model_loads_with_independent_sensor_clocks() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for name in [
+            "illustrative-hpa.json",
+            "qx18-public-reconstruction.json",
+            "qx18-br-training-envelope.json",
+        ] {
+            let loaded = LoadedSimulation::load(&repository.join("models").join(name))
+                .expect("repository model must satisfy the strict Rust contract");
+            let sensor = loaded.sensor_model();
+            assert_eq!(sensor.imu_sample_period_s, 0.01);
+            assert_eq!(sensor.differential_pressure_sample_period_s, 0.01);
+            assert_eq!(sensor.static_pressure_sample_period_s, 1.0 / 32.0);
+            assert_eq!(sensor.alpha_sample_period_s, 0.01);
+        }
     }
 }

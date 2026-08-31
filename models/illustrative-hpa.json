@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.9.0",
+  "schema_version": "0.10.0",
   "metadata": {
     "name": "illustrative-hpa-rigid-v0",
     "provenance": "Synthetic coefficients for software verification only; not derived from a real Birdman aircraft",
@@ -96,7 +96,8 @@
       "acceleration_resolution_mps2": 0.01
     },
     "air_data": {
-      "sample_rate_hz": 32.0,
+      "differential_pressure_sample_rate_hz": 100.0,
+      "static_pressure_sample_rate_hz": 32.0,
       "differential_pressure_range_pa": 500.0,
       "differential_pressure_resolution_pa": 0.0166666667,
       "differential_pressure_bias_pa": 0.0,
@@ -105,6 +106,7 @@
       "static_pressure_resolution_pa": 0.06,
       "static_pressure_bias_pa": 0.0
     },
+    "alpha_sample_rate_hz": 100.0,
     "alpha_bias_deg": 0.0,
     "alpha_resolution_deg": 0.1
   },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:tokutori:birdman:model-contract:0.9.0",
+  "$id": "urn:tokutori:birdman:model-contract:0.10.0",
   "title": "Birdman flight dynamics prototype model contract",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": "0.9.0" },
+    "schema_version": { "const": "0.10.0" },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -161,7 +161,7 @@
     "sensors": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["imu", "air_data", "alpha_bias_deg", "alpha_resolution_deg"],
+      "required": ["imu", "air_data", "alpha_sample_rate_hz", "alpha_bias_deg", "alpha_resolution_deg"],
       "properties": {
         "imu": {
           "type": "object",
@@ -183,9 +183,10 @@
         "air_data": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["sample_rate_hz", "differential_pressure_range_pa", "differential_pressure_resolution_pa", "differential_pressure_bias_pa", "differential_pressure_time_constant_s", "pitot_coefficient", "static_pressure_resolution_pa", "static_pressure_bias_pa"],
+          "required": ["differential_pressure_sample_rate_hz", "static_pressure_sample_rate_hz", "differential_pressure_range_pa", "differential_pressure_resolution_pa", "differential_pressure_bias_pa", "differential_pressure_time_constant_s", "pitot_coefficient", "static_pressure_resolution_pa", "static_pressure_bias_pa"],
           "properties": {
-            "sample_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+            "differential_pressure_sample_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+            "static_pressure_sample_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
             "differential_pressure_range_pa": { "type": "number", "exclusiveMinimum": 0 },
             "differential_pressure_resolution_pa": { "type": "number", "exclusiveMinimum": 0 },
             "differential_pressure_bias_pa": { "type": "number" },
@@ -195,6 +196,7 @@
             "static_pressure_bias_pa": { "type": "number" }
           }
         },
+        "alpha_sample_rate_hz": { "type": "number", "exclusiveMinimum": 0 },
         "alpha_bias_deg": { "type": "number" },
         "alpha_resolution_deg": { "type": "number", "exclusiveMinimum": 0 }
       }

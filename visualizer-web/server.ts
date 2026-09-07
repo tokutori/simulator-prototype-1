@@ -29,20 +29,23 @@ for (const path of [tsxCliPath, webBridgePath, uf2Path]) {
   if (!existsSync(path)) throw new Error(`actual-UF2 web dependency not found: ${path}; run npm install in virtual-platform and npm run build:platform`);
 }
 
-const vite = await createViteServer({
-  root: visualizerDirectory,
-  server: { middlewareMode: true },
-  appType: "spa",
-});
 const httpServer = createServer((request, response) => {
   vite.middlewares(request, response, () => {
     response.statusCode = 404;
     response.end("not found");
   });
 });
+const vite = await createViteServer({
+  root: visualizerDirectory,
+  server: { middlewareMode: true, ws: { server: httpServer } },
+  appType: "spa",
+});
 const webSockets = new WebSocketServer({ noServer: true });
 
 httpServer.on("upgrade", (request, socket, head) => {
+  // Vite's listener on this same HTTP server owns its HMR connection. Keeping
+  // it on the selected app port avoids cross-instance port 24678 collisions.
+  if (['vite-hmr', 'vite-ping'].includes(String(request.headers['sec-websocket-protocol']))) return;
   if (request.url !== "/live") {
     socket.destroy();
     return;

@@ -58,3 +58,27 @@ all rearmed. Stalled I2C still triggered the actual virtual watchdog.
 - Verify live camera lifecycle and recording reload in a browser, including 4K.
 - Keep physical bus timing, electrical faults, real servos, sensor calibration,
   VR headset operation and aircraft model identification explicitly unvalidated.
+
+## Latest integrated snapshot
+
+At `bc85541`, the additional numeric/CG, replay-selection, strict saved evidence,
+and unsupported-peripheral-mode findings above are implemented. Final browser
+suite: three tests pass (actual UF2 restart and keyboard without canvas focus,
+delayed sample versus user selection, and 12001-row 4K analysis reload).
+An earlier restart failure was a real 15s startup timeout: firmware still spun
+through the 650ms sensor boot wait. Both 650ms and20ms startup waits now use the
+production timer-alarm sleep. Actual UF2 recovery and watchdog tests pass again.
+
+Visual inspection also found author CSS overriding `hidden`, exposing replay
+controls in Interactive mode; a global hidden rule and browser assertions now
+prevent it. Performance text no longer overlaps central camera controls at FHD.
+
+The freshly restarted 4173 server's80-update actual-UF2 smoke measured maximum
+average3.32ms/update, minimum1.03x real-time and zero non-realtime samples.
+These short observations do not establish a universal host-speed guarantee.
+
+Remaining final audit includes the longer-capacity run after schema0.12 and
+the explicit frozen-process liveness test. The launch platform also occupies
+much of the early chase view in captured images; evaluate camera occlusion
+handling before considering the visual review closed. Physical model/HIL
+limitations remain as stated above.

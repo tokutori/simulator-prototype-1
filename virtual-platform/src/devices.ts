@@ -275,6 +275,12 @@ export class Dps310Device extends RegisterDevice {
   }
 
   protected writeRegister(register: number, value: number): void {
+    if ((register === 0x06 || register === 0x07) && (value & 0x0f) !== 0) {
+      throw new Error('DPS310 virtual transducer supports OSR1 only');
+    }
+    if (register === 0x09 && value !== 0) {
+      throw new Error('DPS310 FIFO/shift/interrupt configuration is outside the virtual transducer contract');
+    }
     if (register === 0x08) {
       this.registers[register] = ((this.registers[register] ?? 0) & 0xc0) | (value & 0x07);
       const rate = 2 ** (((this.registers[0x06] ?? 0) >>> 4) & 7);

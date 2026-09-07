@@ -34,6 +34,10 @@ This remains a scoped device model, not a complete DPS310 implementation (single
 measurement, FIFO, temperature conversion dynamics and all oversampling modes
 are not modeled).
 
+Unsupported DPS310 pressure/temperature oversampling and CFG_REG FIFO, result
+shift or interrupt configuration now fail explicitly. They must not silently
+reuse the OSR1 scaling law and produce plausible but incorrect pressure values.
+
 ## Servo signal contract
 
 Both live and batch execution observe GPIO16/17 transitions produced by rp2040js.

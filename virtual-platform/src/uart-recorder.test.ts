@@ -60,3 +60,24 @@ test('disabled FIFO has one holding slot besides the transmitting shift register
   sim.clock.tick(20_000);
   assert.deepEqual(bytes, [1,2]);
 });
+
+test('UART rejects IrDA and transmit interrupt configuration immediately', () => {
+  for (const [offset, value] of [[0x30, 0x303], [0x30, 0x305], [0x38, 0x20]]) {
+    const { sim, bytes } = fixture();
+    assert.throws(() => sim.rp2040.writeUint32(BASE + offset!, value!), /outside the recorder contract/);
+    assert.deepEqual(bytes, []);
+  }
+});
+
+test('UART permits HAL DMA request gates but rejects an active DMA transmitter', () => {
+  const { sim, bytes } = fixture(), m = sim.rp2040;
+  m.writeUint32(BASE + 0x48, 3);
+  m.writeUint32(BASE, 70); sim.clock.tick(10_000);
+  assert.deepEqual(bytes, [70]);
+  // Unpaced (DREQ0) descriptor remains pending until clock dispatch. The
+  // recorder must reject it before accepting more output as supported TX.
+  m.writeUint32(0x50000004, BASE);
+  m.writeUint32(0x50000008, 1);
+  m.writeUint32(0x5000000c, 1);
+  assert.throws(() => m.writeUint32(BASE, 71), /active TX DMA/);
+});

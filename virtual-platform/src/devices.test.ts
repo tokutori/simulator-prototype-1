@@ -217,3 +217,14 @@ test('DPS310 samples continuous input, never the host sample-and-hold channel', 
   nowUs += 31250;
   assert.notDeepEqual(readRegisters(device, 0, 3), baseline);
 });
+
+test('DPS310 rejects unsupported oversampling, FIFO and raw-result shift settings', () => {
+  const device = new Dps310Device(() => 0);
+  const write = (register: number, value: number): void => { device.startWrite(); device.writeByte(register); device.writeByte(value); };
+  for (const register of [0x06, 0x07]) {
+    for (const osr of [1, 2, 3, 4, 5, 6, 7]) assert.throws(() => write(register, 0x50 | osr), /OSR1/);
+    write(register, 0x50);
+  }
+  for (const value of [2, 4, 8, 0x10]) assert.throws(() => write(0x09, value), /outside/);
+  write(0x09, 0);
+});

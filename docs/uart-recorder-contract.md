@@ -30,6 +30,10 @@ future firmware revisions.
 This is **not** a physical voltage waveform or full PL011 emulator. TX DMA,
 transmit interrupts, CTS/RTS, receiver oscillator error, analog edge timing,
 wire faults, and resetting/reconfiguring an active UART are not validated here.
+IrDA, TX interrupt enable and active DMA descriptors targeting UART1DR are
+explicitly rejected. Merely enabling UART DMA request gates is allowed because
+the production HAL does this even for blocking CPU writes. The upstream emulator
+does not store DMACR, so checking that register afterward is insufficient.
 The scoped implementation rejects incompatible use; new production usage needs
 a contract extension. GPIO configuration is checked at enqueue/completion, not
 continuously between these events. Whole-system cycle timing remains unvalidated.

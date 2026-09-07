@@ -5,6 +5,7 @@ import { frameAtReceiptTime, trimReceiptBuffer, type ReceivedFlightFrame } from 
 import type { FlightFrame } from "./types.ts";
 
 const frame = (timeS: number, northM: number): FlightFrame => ({
+  controlTelemetry: { tag: "unavailable" },
   timeS,
   northM,
   eastM: 0,

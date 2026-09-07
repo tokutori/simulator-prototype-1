@@ -36,7 +36,28 @@ export function parseFlightCsv(text: string): FlightFrame[] {
 }
 
 export function frameFromLive(observation: InteractiveObservation): FlightFrame {
+  // This adapter is the untrusted JSON boundary, not merely a TypeScript assertion.
+  const numericFields: readonly (keyof InteractiveObservation)[] = [
+    "time_s", "north_m", "east_m", "altitude_m", "roll_rad", "pitch_rad", "yaw_rad",
+    "flight_path_rad", "elevator_rad", "rudder_rad", "sensor_airspeed_mps", "sensor_alpha_rad",
+    "pilot_elevator", "pilot_rudder", "autonomy", "manual_elevator_command_rad",
+    "manual_rudder_command_rad", "automatic_elevator_command_rad", "automatic_rudder_command_rad",
+    "mixed_elevator_command_rad", "mixed_rudder_command_rad", "firmware_sequence", "firmware_time_us",
+    "safe_elevator_command_rad", "observed_elevator_command_rad", "observed_rudder_command_rad",
+    "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
+  ];
+  if (numericFields.some(key => typeof observation[key] !== "number" || !Number.isFinite(observation[key]))
+      || typeof observation.automatic_valid !== "boolean" || typeof observation.surface_contact !== "boolean") {
+    throw new Error("Invalid actual-UF2 telemetry fields");
+  }
   return {
+    controlTelemetry: { tag: "firmware", sequence: observation.firmware_sequence,
+      timeUs: observation.firmware_time_us, automaticValid: observation.automatic_valid,
+      safeElevatorCommandRad: observation.safe_elevator_command_rad,
+      observedElevatorCommandRad: observation.observed_elevator_command_rad,
+      observedRudderCommandRad: observation.observed_rudder_command_rad,
+      elevatorPwmSampleTimeUs: observation.elevator_pwm_sample_time_us,
+      rudderPwmSampleTimeUs: observation.rudder_pwm_sample_time_us },
     timeS: observation.time_s,
     northM: observation.north_m,
     eastM: observation.east_m,
@@ -115,6 +136,15 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
   };
   return {
     timeS: number("time_s"),
+    controlTelemetry: row.get("firmware_sequence") ? {
+      tag: "firmware", sequence: number("firmware_sequence"), timeUs: number("firmware_time_us"),
+      automaticValid: boolean("automatic_valid"),
+      safeElevatorCommandRad: number("safe_elevator_command_deg") * degree,
+      observedElevatorCommandRad: number("observed_elevator_command_deg") * degree,
+      observedRudderCommandRad: number("observed_rudder_command_deg") * degree,
+      elevatorPwmSampleTimeUs: number("elevator_pwm_sample_time_us"),
+      rudderPwmSampleTimeUs: number("rudder_pwm_sample_time_us"),
+    } : { tag: "unavailable" },
     northM: number("north_m"),
     eastM: number("east_m"),
     altitudeM: number("altitude_m"),
@@ -150,6 +180,8 @@ export function interpolatePair(before: FlightFrame, after: FlightFrame, fractio
   };
   return {
     timeS: scalar(before.timeS, after.timeS),
+    // Discrete firmware evidence must never acquire invented fractional sample IDs.
+    controlTelemetry: fraction < 1 ? before.controlTelemetry : after.controlTelemetry,
     northM: scalar(before.northM, after.northM),
     eastM: scalar(before.eastM, after.eastM),
     altitudeM: scalar(before.altitudeM, after.altitudeM),

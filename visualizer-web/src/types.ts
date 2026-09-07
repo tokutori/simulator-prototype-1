@@ -1,4 +1,17 @@
+export type ControlTelemetry = { tag: "unavailable" } | {
+  tag: "firmware";
+  sequence: number;
+  timeUs: number;
+  automaticValid: boolean;
+  safeElevatorCommandRad: number;
+  observedElevatorCommandRad: number;
+  observedRudderCommandRad: number;
+  elevatorPwmSampleTimeUs: number;
+  rudderPwmSampleTimeUs: number;
+};
+
 export interface FlightFrame {
+  controlTelemetry: ControlTelemetry;
   timeS: number;
   northM: number;
   eastM: number;
@@ -24,6 +37,14 @@ export interface FlightFrame {
 }
 
 export interface InteractiveObservation {
+  firmware_sequence: number;
+  firmware_time_us: number;
+  automatic_valid: boolean;
+  safe_elevator_command_rad: number;
+  observed_elevator_command_rad: number;
+  observed_rudder_command_rad: number;
+  elevator_pwm_sample_time_us: number;
+  rudder_pwm_sample_time_us: number;
   time_s: number;
   north_m: number;
   east_m: number;

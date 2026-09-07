@@ -56,15 +56,19 @@ function renderCharts(frames: readonly FlightFrame[]): void {
   ]);
   renderTimeChart("elevator-chart", frames, "Elevator", "deg", [
     series("Manual", frame => frame.manualElevatorCommandRad * degree),
-    series("Automatic", frame => frame.automaticElevatorCommandRad * degree),
+    series("Automatic (valid)", frame => frame.automaticElevatorCommandRad * degree, automaticValid),
     series("Mixed command", frame => frame.mixedElevatorCommandRad * degree),
     series("Actual", frame => frame.elevatorRad * degree),
+    series("PWM received", frame => frame.controlTelemetry.tag === "firmware" ? frame.controlTelemetry.observedElevatorCommandRad * degree : 0,
+      frame => frame.controlTelemetry.tag === "firmware"),
   ]);
   renderTimeChart("rudder-chart", frames, "Rudder", "deg", [
     series("Manual", frame => frame.manualRudderCommandRad * degree),
-    series("Automatic", frame => frame.automaticRudderCommandRad * degree),
+    series("Automatic (valid)", frame => frame.automaticRudderCommandRad * degree, automaticValid),
     series("Mixed command", frame => frame.mixedRudderCommandRad * degree),
     series("Actual", frame => frame.rudderRad * degree),
+    series("PWM received", frame => frame.controlTelemetry.tag === "firmware" ? frame.controlTelemetry.observedRudderCommandRad * degree : 0,
+      frame => frame.controlTelemetry.tag === "firmware"),
   ]);
   renderTimeChart("attitude-chart", frames, "Attitude", "deg", [
     series("Roll", frame => frame.rollRad * degree),
@@ -76,10 +80,15 @@ function renderCharts(frames: readonly FlightFrame[]): void {
 interface SeriesDefinition {
   name: string;
   value(frame: FlightFrame): number;
+  valid(frame: FlightFrame): boolean;
 }
 
-function series(name: string, value: (frame: FlightFrame) => number): SeriesDefinition {
-  return { name, value };
+function automaticValid(frame: FlightFrame): boolean {
+  return frame.controlTelemetry.tag === "unavailable" || frame.controlTelemetry.automaticValid;
+}
+
+function series(name: string, value: (frame: FlightFrame) => number, valid = (_frame: FlightFrame): boolean => true): SeriesDefinition {
+  return { name, value, valid };
 }
 
 function renderTimeChart(
@@ -100,7 +109,7 @@ function renderTimeChart(
   const height = 270 - top - bottom;
   const firstTime = frames[0]?.timeS ?? 0;
   const duration = Math.max(1e-6, (frames.at(-1)?.timeS ?? firstTime) - firstTime);
-  const values = definitions.flatMap(definition => frames.map(frame => definition.value(frame))).filter(Number.isFinite);
+  const values = definitions.flatMap(definition => frames.filter(definition.valid).map(frame => definition.value(frame))).filter(Number.isFinite);
   let minimum = Math.min(...values);
   let maximum = Math.max(...values);
   if (minimum === maximum) { minimum -= 1; maximum += 1; }
@@ -126,8 +135,13 @@ function renderTimeChart(
 
   definitions.forEach((definition, index) => {
     const color = seriesColor(index);
-    const path = frames.map((frame, frameIndex) =>
-      `${frameIndex === 0 ? "M" : "L"}${x(frame.timeS).toFixed(2)},${y(definition.value(frame)).toFixed(2)}`).join(" ");
+    let connected = false;
+    const path = frames.map(frame => {
+      if (!definition.valid(frame)) { connected = false; return ""; }
+      const command = connected ? "L" : "M";
+      connected = true;
+      return `${command}${x(frame.timeS).toFixed(2)},${y(definition.value(frame)).toFixed(2)}`;
+    }).join(" ");
     svg.appendChild(svgElement("path", { class: `series ${color}`, d: path }));
   });
   const legend = svgElement("g", { class: "legend" });

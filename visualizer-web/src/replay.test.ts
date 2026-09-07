@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { interpolateFrame, parseFlightCsv } from "./replay.ts";
+import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
+import type { InteractiveObservation } from "./types.ts";
 
 test("CSV parser accepts simulator output and interpolation is continuous", () => {
   const frames = parseFlightCsv(
@@ -16,6 +17,20 @@ test("CSV parser accepts simulator output and interpolation is continuous", () =
   assert.ok(Math.abs(Math.abs(middle.yawRad) - Math.PI) < 1e-12);
   assert.equal(frames[0]?.surfaceContact, false);
   assert.equal(frames[1]?.surfaceContact, true);
+});
+
+test("firmware evidence stays discrete during presentation interpolation", () => {
+  const frames = parseFlightCsv(
+    "time_s,north_m,altitude_m,pitch_deg,firmware_sequence,firmware_time_us,automatic_valid,elevator_pwm_sample_time_us\n" +
+    "0,0,10,-3,3,123000,false,122000\n1,8,9,-2,5,143000,true,142000\n",
+  );
+  assert.equal(interpolateFrame(frames, 0.5).controlTelemetry.tag, "firmware");
+  assert.deepEqual(interpolateFrame(frames, 0.5).controlTelemetry, frames[0]?.controlTelemetry);
+  assert.equal(parseFlightCsv("time_s,north_m,altitude_m,pitch_deg\n0,0,10,-3\n1,8,9,-2\n")[0]?.controlTelemetry.tag, "unavailable");
+});
+
+test("live JSON without firmware evidence is rejected instead of plotted as real telemetry", () => {
+  assert.throws(() => frameFromLive({} as InteractiveObservation), /Invalid actual-UF2/);
 });
 
 test("CSV parser rejects non-monotonic time", () => {

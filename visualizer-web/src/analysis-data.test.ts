@@ -11,6 +11,7 @@ import type { FlightFrame } from "./types.ts";
 
 function frame(timeS: number, northM: number, eastM: number): FlightFrame {
   return {
+    controlTelemetry: { tag: "unavailable" },
     timeS, northM, eastM, altitudeM: 10 - timeS, rollRad: timeS * 0.1,
     pitchRad: 0, yawRad: 0, flightPathRad: 0, airspeedMps: 5 + timeS,
     alphaRad: 0, elevatorRad: 0, rudderRad: 0, pilotElevator: 0, pilotRudder: 0,

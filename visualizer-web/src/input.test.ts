@@ -10,11 +10,15 @@ test("analog shaping removes the dead zone and preserves endpoints", () => {
   assert.equal(shapeAnalog(-1, 0.08, 1.5), -1);
 });
 
-test("opposite keyboard buttons cancel and release returns toward neutral", () => {
+test("physical buttons press and release immediately, opposite buttons cancel", () => {
   const input = new PilotInput(structuredClone(defaultInputSettings));
   input.pressedCodes.add("KeyS");
   input.update(0.1, null);
-  assert.equal(input.elevator, 0.25);
+  assert.equal(input.elevator, 1);
+  input.pressedCodes.clear();
+  input.update(0.001, null);
+  assert.equal(input.elevator, 0);
+  input.pressedCodes.add("KeyS");
   input.pressedCodes.add("KeyW");
   input.update(0.1, null);
   assert.equal(input.elevator, 0);

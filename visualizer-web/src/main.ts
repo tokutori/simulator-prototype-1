@@ -408,7 +408,7 @@ function bindSettingsInputs(): void {
   const ids = [
     "elevator-source", "elevator-axis", "elevator-buttons", "elevator-invert",
     "rudder-source", "rudder-axis", "rudder-buttons", "rudder-invert",
-    "gamepad-index", "dead-zone", "response-exponent", "button-rise", "button-return",
+    "gamepad-index", "dead-zone", "response-exponent",
   ];
   for (const id of ids) {
     element<HTMLInputElement | HTMLSelectElement>(id).addEventListener("change", readSettingsForm);
@@ -539,6 +539,7 @@ function connectLive(sessionId: number): void {
         dispatch({ type: "mcu-failed", sessionId, error: "Rejected telemetry that did not come from actual RP2040 UF2" });
         return;
       }
+      const nextFrame = frameFromLive(message);
       dispatch({
         type: "mcu-telemetry",
         sessionId,
@@ -552,7 +553,7 @@ function connectLive(sessionId: number): void {
           timingValidated: false,
         },
       });
-      liveFrame = frameFromLive(message);
+      liveFrame = nextFrame;
       liveFrames.push(liveFrame);
       liveReceiptBuffer.push({ frame: liveFrame, receivedAtMs: performance.now() });
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
@@ -726,8 +727,6 @@ function syncSettingsForm(): void {
   element<HTMLInputElement>("gamepad-index").value = String(settings.gamepadIndex);
   element<HTMLInputElement>("dead-zone").value = String(settings.deadZone);
   element<HTMLInputElement>("response-exponent").value = String(settings.responseExponent);
-  element<HTMLInputElement>("button-rise").value = String(settings.buttonRisePerSecond);
-  element<HTMLInputElement>("button-return").value = String(settings.buttonReturnPerSecond);
   document.querySelectorAll(".key-binding").forEach((node) => node.classList.remove("listening"));
 }
 
@@ -747,8 +746,6 @@ function readSettingsForm(): void {
     gamepadIndex: Number(element<HTMLInputElement>("gamepad-index").value),
     deadZone: Number(element<HTMLInputElement>("dead-zone").value),
     responseExponent: Number(element<HTMLInputElement>("response-exponent").value),
-    buttonRisePerSecond: Number(element<HTMLInputElement>("button-rise").value),
-    buttonReturnPerSecond: Number(element<HTMLInputElement>("button-return").value),
   };
   settings = sanitizeSettings(candidate);
   persistSettings();
@@ -779,6 +776,9 @@ function downloadLiveLog(): void {
     "manual_elevator_command_deg", "automatic_elevator_command_deg", "mixed_elevator_command_deg",
     "elevator_deg", "manual_rudder_command_deg", "automatic_rudder_command_deg",
     "mixed_rudder_command_deg", "rudder_deg", "surface_contact",
+    "firmware_sequence", "firmware_time_us", "automatic_valid", "safe_elevator_command_deg",
+    "observed_elevator_command_deg", "observed_rudder_command_deg",
+    "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
   ];
   const rows = liveFrames.map((frame) => [
     frame.timeS, frame.northM, frame.eastM, frame.altitudeM,
@@ -792,6 +792,13 @@ function downloadLiveLog(): void {
     frame.automaticRudderCommandRad * radiansToDegrees,
     frame.mixedRudderCommandRad * radiansToDegrees, frame.rudderRad * radiansToDegrees,
     frame.surfaceContact ? 1 : 0,
+    ...(frame.controlTelemetry.tag === "firmware" ? [
+      frame.controlTelemetry.sequence, frame.controlTelemetry.timeUs, frame.controlTelemetry.automaticValid,
+      frame.controlTelemetry.safeElevatorCommandRad * radiansToDegrees,
+      frame.controlTelemetry.observedElevatorCommandRad * radiansToDegrees,
+      frame.controlTelemetry.observedRudderCommandRad * radiansToDegrees,
+      frame.controlTelemetry.elevatorPwmSampleTimeUs, frame.controlTelemetry.rudderPwmSampleTimeUs,
+    ] : ["", "", "", "", "", "", "", ""]),
   ].join(","));
   const blob = new Blob([[header.join(","), ...rows].join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

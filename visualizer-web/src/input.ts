@@ -16,8 +16,6 @@ export interface InputSettings {
   gamepadIndex: number;
   deadZone: number;
   responseExponent: number;
-  buttonRisePerSecond: number;
-  buttonReturnPerSecond: number;
 }
 
 export const defaultInputSettings: InputSettings = {
@@ -42,8 +40,6 @@ export const defaultInputSettings: InputSettings = {
   gamepadIndex: 0,
   deadZone: 0.08,
   responseExponent: 1.35,
-  buttonRisePerSecond: 2.5,
-  buttonReturnPerSecond: 3.5,
 };
 
 export class PilotInput {
@@ -56,14 +52,12 @@ export class PilotInput {
     this.settings = settings;
   }
 
-  update(deltaS: number, gamepad: Gamepad | null): void {
+  update(_deltaS: number, gamepad: Gamepad | null): void {
     this.elevator = this.updateAxis(
-      this.elevator,
       this.settings.elevator,
-      deltaS,
       gamepad,
     );
-    this.rudder = this.updateAxis(this.rudder, this.settings.rudder, deltaS, gamepad);
+    this.rudder = this.updateAxis(this.settings.rudder, gamepad);
   }
 
   clear(): void {
@@ -73,9 +67,7 @@ export class PilotInput {
   }
 
   private updateAxis(
-    current: number,
     binding: AxisBinding,
-    deltaS: number,
     gamepad: Gamepad | null,
   ): number {
     if (binding.source === "gamepad-axis") {
@@ -97,8 +89,8 @@ export class PilotInput {
         : Boolean(gamepad?.buttons[binding.positiveButton]?.pressed);
     const rawTarget = negative === positive ? 0 : negative ? -1 : 1;
     const target = binding.invert ? -rawTarget : rawTarget;
-    const rate = target === 0 ? this.settings.buttonReturnPerSecond : this.settings.buttonRisePerSecond;
-    return approach(current, target, Math.max(0, deltaS) * rate);
+    // Physical GPIO buttons are binary. Input shaping belongs in production firmware.
+    return target;
   }
 }
 
@@ -138,18 +130,6 @@ export function sanitizeSettings(value: unknown): InputSettings {
       0.5,
       3,
       defaultInputSettings.responseExponent,
-    ),
-    buttonRisePerSecond: numberWithin(
-      candidate.buttonRisePerSecond,
-      0.1,
-      10,
-      defaultInputSettings.buttonRisePerSecond,
-    ),
-    buttonReturnPerSecond: numberWithin(
-      candidate.buttonReturnPerSecond,
-      0.1,
-      10,
-      defaultInputSettings.buttonReturnPerSecond,
     ),
   };
 }

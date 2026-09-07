@@ -2,6 +2,7 @@
 #![no_main]
 
 mod sensors;
+mod telemetry;
 
 use core::f32::consts::PI;
 use cortex_m_rt::entry;
@@ -62,8 +63,8 @@ enum SensorPoll {
 }
 
 impl SensorRuntime {
-    fn initialize<I: I2c>(i2c: &mut I) -> Self {
-        match SensorState::initialize(i2c, None) {
+    fn initialize<I: I2c, D: DelayNs>(i2c: &mut I, delay: &mut D) -> Self {
+        match SensorState::initialize(i2c, delay, None) {
             Ok(state) => Self::Active {
                 state,
                 consecutive_failures: 0,
@@ -75,7 +76,7 @@ impl SensorRuntime {
         }
     }
 
-    fn poll<I: I2c>(&mut self, i2c: &mut I) -> SensorPoll {
+    fn poll<I: I2c, D: DelayNs>(&mut self, i2c: &mut I, delay: &mut D) -> SensorPoll {
         let previous = core::mem::replace(
             self,
             Self::RetryAfter {
@@ -143,7 +144,7 @@ impl SensorRuntime {
                     };
                     return SensorPoll::Unavailable;
                 }
-                match SensorState::initialize(i2c, retained_launch_pressure_pa) {
+                match SensorState::initialize(i2c, delay, retained_launch_pressure_pa) {
                     Ok(state) => {
                         *self = Self::Settling {
                             state,
@@ -228,11 +229,32 @@ fn main() -> ! {
     let mut control_tick_high = false;
 
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    // UART1 GPIO8/9 is a production flight-recorder interface, not a simulator hook.
+    let recorder = hal::uart::UartPeripheral::new(
+        pac.UART1,
+        (
+            pins.gpio8.into_function::<hal::gpio::FunctionUart>(),
+            pins.gpio9.into_function::<hal::gpio::FunctionUart>(),
+        ),
+        &mut pac.RESETS,
+    )
+    .enable(
+        hal::uart::UartConfig::new(
+            1_000_000.Hz(),
+            hal::uart::DataBits::Eight,
+            None,
+            hal::uart::StopBits::One,
+        ),
+        clocks.peripheral_clock.freq(),
+    )
+    .unwrap();
+    let mut record_sequence = 0_u32;
     let mut controller = ControllerState::default();
+    let mut barometric_sample_sequence = 0_u32;
     let mut safety = SafetyState::default();
     // BNO055 specifies 650 ms from reset to configuration mode.
     timer.delay_ms(650);
-    let mut sensor_runtime = SensorRuntime::initialize(&mut i2c);
+    let mut sensor_runtime = SensorRuntime::initialize(&mut i2c, &mut timer);
     // Covers BNO055 operation-mode transition and first SDP810/DPS310 samples.
     timer.delay_ms(20);
 
@@ -245,15 +267,21 @@ fn main() -> ! {
             let _ = control_tick.set_low();
         }
         if safety.controller_should_start_clean() {
-            controller = ControllerState::default();
+            controller.reset_feedback();
         }
-        let measurement_frame = match sensor_runtime.poll(&mut i2c) {
+        let measurement_frame = match sensor_runtime.poll(&mut i2c, &mut timer) {
             SensorPoll::Measurement(frame) => Some(frame),
             SensorPoll::Unavailable => None,
         };
         let all_sensors_valid = measurement_frame
             .as_ref()
             .is_some_and(|frame| frame.all_sensors_valid);
+        if measurement_frame
+            .as_ref()
+            .is_some_and(|frame| frame.pressure_sample_fresh)
+        {
+            barometric_sample_sequence = barometric_sample_sequence.wrapping_add(1);
+        }
         let automatic_elevator = measurement_frame.map(|frame| {
             let measurement = frame.measurements;
             controller
@@ -266,6 +294,7 @@ fn main() -> ! {
                         airspeed_valid: frame.all_sensors_valid,
                         alpha_rad: measurement.alpha_rad,
                         barometric_altitude_m: measurement.barometric_altitude_m,
+                        barometric_sample_sequence,
                     },
                     CONTROL_PERIOD_US as f32 * 1.0e-6,
                 )
@@ -279,7 +308,7 @@ fn main() -> ! {
         });
         let safe = safety.step(&SAFETY_CONFIG, automatic_elevator);
         if safe.reset_controller {
-            controller = ControllerState::default();
+            controller.reset_feedback();
         }
         let pilot = decode(RawPilotInput {
             elevator_adc: adc.read(&mut elevator_axis).unwrap_or(2048),
@@ -323,6 +352,25 @@ fn main() -> ! {
         } else {
             let _ = sensor_invalid.set_high();
         }
+        recorder.write_full_blocking(
+            &telemetry::ControlRecord {
+                sequence: record_sequence,
+                time_us: update_start_us,
+                automatic_valid: automatic_elevator.is_some(),
+                values: [
+                    pilot.elevator,
+                    pilot.rudder,
+                    pilot.autonomy,
+                    automatic_elevator.unwrap_or(0.0),
+                    automatic_rudder,
+                    safe.command_rad,
+                    elevator_command,
+                    rudder_command,
+                ],
+            }
+            .encode(),
+        );
+        record_sequence = record_sequence.wrapping_add(1);
         let elapsed_us = timer.get_counter_low().wrapping_sub(update_start_us);
         if elapsed_us < CONTROL_PERIOD_US {
             let _ = deadline_missed.set_low();

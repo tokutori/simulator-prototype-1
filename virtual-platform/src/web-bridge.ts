@@ -7,6 +7,9 @@ import { ConsoleLogger, GPIOPinState, I2CMode, LogLevel, Simulator } from 'rp204
 
 import { As5600Device, Bno055Device, Dps310Device, Sdp810Device, type I2cDevice, type PlantObservation } from './devices.js';
 import { loadUf2 } from './uf2.js';
+import { FirmwareTelemetry } from './firmware-telemetry.js';
+import { attachServoPwm } from './servo-pwm.js';
+import { advanceUntil } from './execution-budget.js';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -39,6 +42,11 @@ const readPlant = async (): Promise<PlantObservation> => {
 
 const simulator = new Simulator();
 const mcu = simulator.rp2040;
+const recorder = new FirmwareTelemetry();
+const uart = mcu.uart[1];
+if (!uart) throw new Error('required UART1 recorder is missing');
+uart.onByte = byte => recorder.receive(byte);
+const servos = attachServoPwm(simulator);
 mcu.logger = new ConsoleLogger(LogLevel.Error, false);
 loadUf2(uf2Path, mcu);
 const vectorTable = 0x10000100;
@@ -49,8 +57,8 @@ mcu.core.PC = mcu.readUint32(vectorTable + 4) & 0xffff_fffe;
 let observation = await readPlant();
 const bno = new Bno055Device();
 const angle = new As5600Device();
-const sdp = new Sdp810Device();
-const dps = new Dps310Device();
+const sdp = new Sdp810Device(() => simulator.clock.micros);
+const dps = new Dps310Device(() => simulator.clock.micros);
 const devices = new Map<number, I2cDevice>([bno, angle, sdp, dps].map(device => [device.address, device]));
 const updateDevices = (): void => {
   bno.update(observation);
@@ -66,10 +74,10 @@ let connected: I2cDevice | undefined;
 i2c.onStart = () => i2c.completeStart();
 i2c.onConnect = (address, mode) => {
   connected = devices.get(address);
-  if (connected) mode === I2CMode.Write ? connected.startWrite() : connected.startRead();
-  i2c.completeConnect(connected !== undefined);
+  const acknowledged = connected ? (mode === I2CMode.Write ? connected.startWrite() : connected.startRead()) : false;
+  i2c.completeConnect(acknowledged);
 };
-i2c.onWriteByte = value => { connected?.writeByte(value); i2c.completeWrite(connected !== undefined); };
+i2c.onWriteByte = value => { i2c.completeWrite(connected ? connected.writeByte(value) : false); };
 i2c.onReadByte = () => i2c.completeRead(connected?.readByte() ?? 0xff);
 i2c.onStop = () => { connected = undefined; i2c.completeStop(); };
 
@@ -77,9 +85,7 @@ for (const pin of [10, 11, 12, 13]) mcu.gpio[pin]?.setInputValue(true);
 applyPilot({ pilot_elevator: 0, pilot_rudder: 0, autonomy: 1 });
 const safetyPin = mcu.gpio[21];
 const deadlinePin = mcu.gpio[20];
-const pwmCandidate = mcu.pwm.channels[0];
-if (!safetyPin || !deadlinePin || !pwmCandidate) throw new Error('required rp2040js GPIO/PWM is missing');
-const pwm = pwmCandidate;
+if (!safetyPin || !deadlinePin) throw new Error('required rp2040js GPIO is missing');
 let safetyFailsafe = true;
 let deadlineMissed = false;
 safetyPin.addListener(state => { if (state === GPIOPinState.High) safetyFailsafe = true; else if (state === GPIOPinState.Low) safetyFailsafe = false; });
@@ -87,8 +93,9 @@ deadlinePin.addListener(state => { if (state === GPIOPinState.High) deadlineMiss
 
 const cycleNanos = 1e9 / 125_000_000 * 50;
 let instructions = 0;
-while (((pwm.cc & 0xffff) === 0 || safetyFailsafe) && instructions < 100_000_000) executeOne();
-if ((pwm.cc & 0xffff) === 0 || safetyFailsafe) throw new Error('actual UF2 did not arm in rp2040js');
+advanceUntil(() => !safetyFailsafe && recorder.state.tag === 'received'
+  && servos.elevator.sample(simulator.clock.micros).kind === 'valid'
+  && servos.rudder.sample(simulator.clock.micros).kind === 'valid', executeOne, 100_000_000);
 
 const initialSimulationS = observation.time_s;
 let initialWallMs: number | undefined;
@@ -97,10 +104,12 @@ let processingAverageMs = 0;
 process.stdout.write(`${JSON.stringify({ type: 'ready', backend: 'rp2040js-actual-uf2' })}\n`);
 const input = createInterface({ input: process.stdin });
 let stepChain = Promise.resolve();
+let session: 'active' | 'ended' = 'active';
 input.on('line', line => {
-  stepChain = stepChain.then(() => step(line)).catch(error => {
+  stepChain = stepChain.then(() => session === 'active' ? step(line) : undefined).catch(error => {
     process.stderr.write(`actual-UF2 web bridge: ${String(error)}\n`);
     process.exitCode = 1;
+    finish('error', String(error));
   });
 });
 input.on('close', () => {
@@ -114,23 +123,27 @@ async function step(line: string): Promise<void> {
   const started = performance.now();
   initialWallMs ??= started;
   const command = parseCommand(line);
+  // Snapshot the completed firmware record and physical PWM before applying the
+  // next input. They are labelled separately from the end-of-interval plant state.
+  const record = recorder.requireFresh(simulator.clock.micros);
+  const elevator = servos.elevator.sample(simulator.clock.micros);
+  const rudder = servos.rudder.sample(simulator.clock.micros);
+  if (elevator.kind !== 'valid' || rudder.kind !== 'valid') throw new Error('servo PWM missing or invalid');
+  const intervalStart = observation.time_s;
   applyPilot(command);
-  const elevatorCommandRad = pulseToRad(pwm.cc & 0xffff);
-  const rudderCommandRad = pulseToRad((pwm.cc >>> 16) & 0xffff);
+  const elevatorCommandRad = elevator.commandRad;
+  const rudderCommandRad = rudder.commandRad;
   plant.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
   observation = await readPlant();
   updateDevices();
-  while (simulator.clock.micros < nextFirmwareTickUs && instructions < 100_000_000) executeOne();
-  if (instructions >= 100_000_000) throw new Error('rp2040js instruction limit reached');
+  advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs, executeOne, 1_000_000);
   nextFirmwareTickUs += 10_000;
 
-  const pilotElevator = decodedAxis(command.pilot_elevator, command.elevator_input_kind);
-  const pilotRudder = decodedAxis(command.pilot_rudder, command.rudder_input_kind);
-  const autonomy = Math.round(command.autonomy * 4095) / 4095;
+  const pilotElevator = record.pilotElevator;
+  const pilotRudder = record.pilotRudder;
+  const autonomy = record.autonomy;
   const manualElevator = pilotElevator * 10 * Math.PI / 180;
   const manualRudder = -pilotRudder * 10 * Math.PI / 180;
-  const automaticElevator = inferAutomatic(elevatorCommandRad, manualElevator, autonomy);
-  const automaticRudder = inferAutomatic(rudderCommandRad, manualRudder, autonomy);
   const processingMs = performance.now() - started;
   processingAverageMs = processingAverageMs === 0 ? processingMs : processingAverageMs * 0.9 + processingMs * 0.1;
   const wallElapsedMs = performance.now() - initialWallMs;
@@ -145,10 +158,19 @@ async function step(line: string): Promise<void> {
     autonomy,
     manual_elevator_command_rad: manualElevator,
     manual_rudder_command_rad: manualRudder,
-    automatic_elevator_command_rad: automaticElevator,
-    automatic_rudder_command_rad: automaticRudder,
-    mixed_elevator_command_rad: elevatorCommandRad,
-    mixed_rudder_command_rad: rudderCommandRad,
+    automatic_elevator_command_rad: record.automaticElevator,
+    automatic_rudder_command_rad: record.automaticRudder,
+    mixed_elevator_command_rad: record.mixedElevator,
+    mixed_rudder_command_rad: record.mixedRudder,
+    firmware_sequence: record.sequence,
+    firmware_time_us: record.timeUs,
+    automatic_valid: record.automaticValid,
+    safe_elevator_command_rad: record.safeElevator,
+    observed_elevator_command_rad: elevatorCommandRad,
+    observed_rudder_command_rad: rudderCommandRad,
+    elevator_pwm_sample_time_us: elevator.atUs,
+    rudder_pwm_sample_time_us: rudder.atUs,
+    plant_interval_start_s: intervalStart,
     backend: 'rp2040js-actual-uf2',
     emulation: {
       processing_ms: processingMs,
@@ -160,7 +182,15 @@ async function step(line: string): Promise<void> {
       timing_validated: false,
     },
   })}\n`);
-  if (observation.surface_contact) input.close();
+  if (observation.surface_contact) finish('ended', 'surface contact');
+}
+
+function finish(type: 'ended' | 'error', message: string): void {
+  if (session === 'ended') return;
+  session = 'ended';
+  process.stdout.write(`${JSON.stringify({ type, message })}\n`);
+  input.close();
+  process.stdin.pause();
 }
 
 function executeOne(): void {
@@ -183,19 +213,6 @@ function setAxisOrButtons(channel: number, negativePin: number, positivePin: num
   mcu.adc.channelValues[channel] = buttons ? 2048 : Math.round((normalized + 1) * 0.5 * 4095);
 }
 
-function decodedAxis(value: number, kind = 'analog'): number {
-  if (kind === 'buttons') return value < -0.05 ? -1 : value > 0.05 ? 1 : 0;
-  const counts = Math.round((clamp(value, -1, 1) + 1) * 0.5 * 4095);
-  const centered = counts - 2047.5;
-  const magnitude = Math.abs(centered);
-  return magnitude <= 164 ? 0 : Math.sign(centered) * Math.min(1, (magnitude - 164) / (2047.5 - 164));
-}
-
-function inferAutomatic(mixed: number, manual: number, autonomy: number): number {
-  return autonomy < 1e-4 ? 0 : clamp((mixed - manual * (1 - autonomy)) / autonomy, -10 * Math.PI / 180, 10 * Math.PI / 180);
-}
-
-function pulseToRad(pulseUs: number): number { return (pulseUs - 1500) * (10 * Math.PI / 180) / 500; }
 function clamp(value: number, minimum: number, maximum: number): number { return Math.min(maximum, Math.max(minimum, value)); }
 function parseCommand(line: string): PilotCommand {
   const value = JSON.parse(line) as PilotCommand;

@@ -11,7 +11,7 @@ import {
   LineBasicMaterial,
   Mesh,
   MeshStandardMaterial,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   PerspectiveCamera,
   Scene,
   Vector3,
@@ -71,7 +71,7 @@ applyUiScale(window.innerWidth, window.innerHeight);
 const renderer = new WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = PCFSoftShadowMap;
+renderer.shadowMap.type = PCFShadowMap;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType("local");
 

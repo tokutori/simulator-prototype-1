@@ -26,7 +26,9 @@ export class LivePlayback {
   frame(nowMs: number): FlightFrame | undefined {
     const first = this.samples[0];
     const last = this.samples.at(-1);
-    const elapsed = this.previousWallMs === undefined ? 0 : Math.max(0, Math.min(50, nowMs - this.previousWallMs)) / 1000;
+    // Capping elapsed time would accumulate an unbounded backlog below 20 FPS.
+    // Visibility/timeline discontinuities are reset explicitly by the browser adapter.
+    const elapsed = this.previousWallMs === undefined ? 0 : Math.max(0, nowMs - this.previousWallMs) / 1000;
     this.previousWallMs = nowMs;
     if (!first || !last || this.cursorS === undefined) return undefined;
     // Prime a two-interval buffer before starting. Under-runs hold, never invent a future pose.

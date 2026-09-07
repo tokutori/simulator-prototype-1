@@ -62,3 +62,15 @@ test("terminal records shorter than the prime buffer still drain to their final 
   playback.finish();
   assert.equal(playback.frame(30)!.timeS, 0.01);
 });
+
+test("low render rate does not accumulate an artificial simulation-clock backlog", () => {
+  const playback = new LivePlayback();
+  playback.push(frame(0, 0), 0);
+  playback.frame(0);
+  let shown = 0;
+  for (let now = 10; now <= 1000; now += 10) {
+    playback.push(frame(now / 1000, now / 100), now);
+    if (now % 100 === 0) shown = playback.frame(now)!.timeS;
+  }
+  assert.ok(shown >= 0.99);
+});

@@ -1,4 +1,5 @@
 import type { FlightFrame, InteractiveObservation } from "./types.ts";
+import { isRunIdentity } from "./types.ts";
 
 const degree = Math.PI / 180;
 
@@ -43,17 +44,23 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
     "pilot_elevator", "pilot_rudder", "autonomy", "manual_elevator_command_rad",
     "manual_rudder_command_rad", "automatic_elevator_command_rad", "automatic_rudder_command_rad",
     "mixed_elevator_command_rad", "mixed_rudder_command_rad", "firmware_sequence", "firmware_time_us",
-    "safe_elevator_command_rad", "observed_elevator_command_rad", "observed_rudder_command_rad",
+    "safe_elevator_command_rad", "safe_rudder_command_rad", "observed_elevator_command_rad", "observed_rudder_command_rad",
     "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
   ];
   if (numericFields.some(key => typeof observation[key] !== "number" || !Number.isFinite(observation[key]))
       || typeof observation.automatic_valid !== "boolean" || typeof observation.surface_contact !== "boolean") {
     throw new Error("Invalid actual-UF2 telemetry fields");
   }
+  if (!isRunIdentity(observation.run_identity) || observation.emulation?.timing_acceleration !== 1
+      || observation.emulation?.timing_validated !== false) {
+    throw new Error("Unverified run identity or scaled CPU timing rejected");
+  }
   return {
     controlTelemetry: { tag: "firmware", sequence: observation.firmware_sequence,
+      runIdentity: observation.run_identity,
       timeUs: observation.firmware_time_us, automaticValid: observation.automatic_valid,
       safeElevatorCommandRad: observation.safe_elevator_command_rad,
+      safeRudderCommandRad: observation.safe_rudder_command_rad,
       observedElevatorCommandRad: observation.observed_elevator_command_rad,
       observedRudderCommandRad: observation.observed_rudder_command_rad,
       elevatorPwmSampleTimeUs: observation.elevator_pwm_sample_time_us,
@@ -134,12 +141,16 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
     if (raw === "1" || raw === "true") return true;
     throw new Error(`invalid boolean ${name} at CSV row ${lineNumber}`);
   };
+  const identity = { uf2_sha256: row.get("uf2_sha256"), model_sha256: row.get("model_sha256"), plant_sha256: row.get("plant_sha256") };
+  if (row.get("firmware_sequence") && !isRunIdentity(identity)) throw new Error(`Missing or invalid run identity at CSV row ${lineNumber}`);
   return {
     timeS: number("time_s"),
     controlTelemetry: row.get("firmware_sequence") ? {
       tag: "firmware", sequence: number("firmware_sequence"), timeUs: number("firmware_time_us"),
+      runIdentity: { uf2_sha256: identity.uf2_sha256 ?? "", model_sha256: identity.model_sha256 ?? "", plant_sha256: identity.plant_sha256 ?? "" },
       automaticValid: boolean("automatic_valid"),
       safeElevatorCommandRad: number("safe_elevator_command_deg") * degree,
+      safeRudderCommandRad: number("safe_rudder_command_deg") * degree,
       observedElevatorCommandRad: number("observed_elevator_command_deg") * degree,
       observedRudderCommandRad: number("observed_rudder_command_deg") * degree,
       elevatorPwmSampleTimeUs: number("elevator_pwm_sample_time_us"),

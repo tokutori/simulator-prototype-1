@@ -1,4 +1,5 @@
 import type { FlightFrame } from "./types.ts";
+import { isRunIdentity } from "./types.ts";
 
 export interface FlightAnalysisDataset {
   version: 2;
@@ -60,7 +61,8 @@ function validFrame(value: FlightFrame): boolean {
   if (!evidence || typeof evidence !== "object") return false;
   if (evidence.tag === "unavailable") return true;
   return evidence.tag === "firmware" && typeof evidence.automaticValid === "boolean"
-    && Object.entries(evidence).every(([key, entry]) => key === "tag" || key === "automaticValid"
+    && isRunIdentity(evidence.runIdentity)
+    && Object.entries(evidence).every(([key, entry]) => key === "tag" || key === "automaticValid" || key === "runIdentity"
       || (typeof entry === "number" && Number.isFinite(entry)));
 }
 

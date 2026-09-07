@@ -1,9 +1,24 @@
+export interface RunIdentity {
+  uf2_sha256: string;
+  model_sha256: string;
+  plant_sha256: string;
+}
+
+export function isRunIdentity(value: unknown): value is RunIdentity {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<RunIdentity>;
+  return [candidate.uf2_sha256, candidate.model_sha256, candidate.plant_sha256]
+    .every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash));
+}
+
 export type ControlTelemetry = { tag: "unavailable" } | {
   tag: "firmware";
+  runIdentity: RunIdentity;
   sequence: number;
   timeUs: number;
   automaticValid: boolean;
   safeElevatorCommandRad: number;
+  safeRudderCommandRad: number;
   observedElevatorCommandRad: number;
   observedRudderCommandRad: number;
   elevatorPwmSampleTimeUs: number;
@@ -37,10 +52,12 @@ export interface FlightFrame {
 }
 
 export interface InteractiveObservation {
+  run_identity: RunIdentity;
   firmware_sequence: number;
   firmware_time_us: number;
   automatic_valid: boolean;
   safe_elevator_command_rad: number;
+  safe_rudder_command_rad: number;
   observed_elevator_command_rad: number;
   observed_rudder_command_rad: number;
   elevator_pwm_sample_time_us: number;
@@ -69,6 +86,7 @@ export interface InteractiveObservation {
   surface_contact: boolean;
   backend: "rp2040js-actual-uf2";
   emulation: {
+    timing_acceleration: 1;
     processing_ms: number;
     processing_average_ms: number;
     real_time_ratio: number;

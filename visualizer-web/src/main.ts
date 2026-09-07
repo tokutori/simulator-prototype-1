@@ -547,6 +547,7 @@ function connectLive(sessionId: number): void {
         type: "mcu-telemetry",
         sessionId,
         performance: {
+          timingAcceleration: message.emulation.timing_acceleration,
           processingMs: message.emulation.processing_ms,
           processingAverageMs: message.emulation.processing_average_ms,
           realTimeRatio: message.emulation.real_time_ratio,
@@ -788,6 +789,7 @@ function downloadLiveLog(): void {
     "firmware_sequence", "firmware_time_us", "automatic_valid", "safe_elevator_command_deg",
     "observed_elevator_command_deg", "observed_rudder_command_deg",
     "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
+    "safe_rudder_command_deg", "uf2_sha256", "model_sha256", "plant_sha256",
   ];
   const rows = liveFrames.map((frame) => [
     frame.timeS, frame.northM, frame.eastM, frame.altitudeM,
@@ -807,7 +809,10 @@ function downloadLiveLog(): void {
       frame.controlTelemetry.observedElevatorCommandRad * radiansToDegrees,
       frame.controlTelemetry.observedRudderCommandRad * radiansToDegrees,
       frame.controlTelemetry.elevatorPwmSampleTimeUs, frame.controlTelemetry.rudderPwmSampleTimeUs,
-    ] : ["", "", "", "", "", "", "", ""]),
+      frame.controlTelemetry.safeRudderCommandRad * radiansToDegrees,
+      frame.controlTelemetry.runIdentity.uf2_sha256, frame.controlTelemetry.runIdentity.model_sha256,
+      frame.controlTelemetry.runIdentity.plant_sha256,
+    ] : Array.from({ length: 12 }, () => "")),
   ].join(","));
   const blob = new Blob([[header.join(","), ...rows].join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

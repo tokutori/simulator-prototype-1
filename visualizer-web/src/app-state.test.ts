@@ -3,6 +3,7 @@ import test from "node:test";
 import { present, update, type AppState, type EmulationPerformance } from "./app-state.ts";
 
 const realtime: EmulationPerformance = {
+  timingAcceleration: 1,
   processingMs: 4,
   processingAverageMs: 5,
   realTimeRatio: 1,
@@ -19,6 +20,7 @@ test("only telemetry can construct an MCU running state", () => {
   assert.deepEqual(effect, { type: "connect-mcu", sessionId: 1 });
   const [running] = update(connecting, { type: "mcu-telemetry", sessionId: 1, performance: realtime });
   assert.equal(running.tag, "mcu-running");
+  assert.match(present(running).performance, /CPU ×1.*cycle timing UNVALIDATED/);
 });
 
 test("slow or deadline-missed emulation is an explicit warning state", () => {

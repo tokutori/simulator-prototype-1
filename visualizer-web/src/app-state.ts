@@ -1,4 +1,5 @@
 export interface EmulationPerformance {
+  timingAcceleration: 1;
   processingMs: number;
   processingAverageMs: number;
   realTimeRatio: number;
@@ -91,5 +92,5 @@ function runningPresentation(performance: EmulationPerformance): AppPresentation
 }
 
 function formatPerformance(value: EmulationPerformance): string {
-  return `${value.realTimeRatio.toFixed(2)}× real-time · ${value.processingAverageMs.toFixed(1)} ms/update · lag ${value.lagMs.toFixed(0)} ms${value.deadlineMissed ? " · DEADLINE MISS" : ""}`;
+  return `${value.realTimeRatio.toFixed(2)}× real-time · ${value.processingAverageMs.toFixed(1)} ms/update · lag ${value.lagMs.toFixed(0)} ms${value.deadlineMissed ? " · DEADLINE MISS" : ""} · CPU ×${value.timingAcceleration} · cycle timing UNVALIDATED`;
 }

@@ -254,9 +254,21 @@ impl Default for GroundEffectModel {
     }
 }
 
+/// Coordinate contract for aerodynamic force coefficients.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ForceCoefficientBasis {
+    /// CL, CD, CY resolved in the orthogonal wind frame.
+    WindAxes,
+    /// CL/CD in the longitudinal stability plane; CY is total body-axis side force.
+    /// Explicit small-sideslip approximation used by the source BR model.
+    StabilityLiftDragBodySide,
+}
+
 /// Validated rigid-aircraft and aerodynamic model.
 #[derive(Clone, Copy, Debug)]
 pub struct AircraftModel<'a> {
+    /// Coordinate definition of supplied force coefficients.
+    pub force_coefficient_basis: ForceCoefficientBasis,
     /// Total mass in kilograms.
     pub mass_kg: f64,
     /// Body-axis inertia tensor.

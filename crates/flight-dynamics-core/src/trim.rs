@@ -116,6 +116,7 @@ mod tests {
 
     fn model(points: &[AeroPoint]) -> AircraftModel<'_> {
         AircraftModel {
+            force_coefficient_basis: crate::ForceCoefficientBasis::WindAxes,
             mass_kg: 100.0,
             inertia_kg_m2: Inertia {
                 ixx: 10.0,

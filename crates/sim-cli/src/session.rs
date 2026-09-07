@@ -2,8 +2,8 @@
 
 use crate::config::{ConfigError, LoadedSimulation, OutOfRangePolicy, deg_to_rad};
 use flight_dynamics_core::{
-    Actuator, ActuatorError, ControlSurfaceDeflection, Quaternion, RigidBodyState, SensorError,
-    SensorSample, SensorSuite, StepError, Vec3, aerodynamic_loads, step_rk4,
+    Actuator, ActuatorError, ControlSurfaceDeflection, RigidBodyState, SensorError, SensorSample,
+    SensorSuite, StepError, aerodynamic_loads, step_rk4,
 };
 use serde::Serialize;
 
@@ -116,22 +116,7 @@ impl PlantSession {
     ///
     /// Returns an error if actuator or sensor initialization fails.
     pub fn new(loaded: LoadedSimulation) -> Result<Self, PlantSessionError> {
-        let initial = &loaded.file.initial_state;
-        let alpha = deg_to_rad(initial.alpha_deg);
-        let state = RigidBodyState {
-            position_ned_m: Vec3::new(0.0, 0.0, -initial.altitude_m),
-            velocity_body_mps: Vec3::new(
-                initial.airspeed_mps * alpha.cos(),
-                0.0,
-                initial.airspeed_mps * alpha.sin(),
-            ),
-            attitude_body_to_ned: Quaternion::from_euler(
-                deg_to_rad(initial.roll_deg),
-                deg_to_rad(initial.pitch_deg),
-                deg_to_rad(initial.heading_deg),
-            ),
-            rates_body_rad_s: Vec3::ZERO,
-        };
+        let state = loaded.initial_rigid_body_state();
         let launch_elevator_rad = deg_to_rad(
             loaded
                 .file
@@ -376,7 +361,10 @@ mod tests {
             .join("../../models/qx18-br-training-envelope.json");
         let mut loaded = LoadedSimulation::load(&model).expect("model");
         loaded.file.aerodynamics.out_of_range_policy = OutOfRangePolicy::Terminate;
-        loaded.file.initial_state.alpha_deg = 89.0;
+        loaded.file.initial_state.velocity = crate::config::InitialVelocityFile::AirRelative {
+            airspeed_mps: 5.0,
+            alpha_deg: 89.0,
+        };
         let mut session = PlantSession::new(loaded).expect("session");
         assert!(matches!(
             session.step(0.0, 0.0, 0.01),

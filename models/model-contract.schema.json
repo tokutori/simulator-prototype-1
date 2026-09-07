@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:tokutori:birdman:model-contract:0.10.0",
+  "$id": "urn:tokutori:birdman:model-contract:0.11.0",
   "title": "Birdman flight dynamics prototype model contract",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": "0.10.0" },
+    "schema_version": { "const": "0.11.0" },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -84,8 +84,9 @@
     "aerodynamics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["out_of_range_policy", "longitudinal_table", "derivatives_per_rad", "ground_effect"],
+      "required": ["force_coefficient_basis", "out_of_range_policy", "longitudinal_table", "derivatives_per_rad", "ground_effect"],
       "properties": {
+        "force_coefficient_basis": { "enum": ["wind-axes", "stability-lift-drag-body-side"] },
         "out_of_range_policy": {
           "enum": ["terminate", "clamp-and-flag"],
           "description": "Host behavior after alpha leaves the supplied table. The core always holds the nearest endpoint so loads remain finite."
@@ -236,11 +237,32 @@
     "initial_state": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["altitude_m", "airspeed_mps", "alpha_deg", "roll_deg", "pitch_deg", "heading_deg"],
+      "required": ["altitude_m", "velocity", "roll_deg", "pitch_deg", "heading_deg"],
       "properties": {
         "altitude_m": { "type": "number", "minimum": 0 },
-        "airspeed_mps": { "type": "number", "minimum": 0 },
-        "alpha_deg": { "type": "number" },
+        "velocity": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["frame", "speed_mps", "flight_path_deg", "track_deg"],
+              "properties": {
+                "frame": { "const": "ground-relative" },
+                "speed_mps": { "type": "number", "minimum": 0 },
+                "flight_path_deg": { "type": "number", "minimum": -90, "maximum": 90 },
+                "track_deg": { "type": "number" }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["frame", "airspeed_mps", "alpha_deg"],
+              "properties": {
+                "frame": { "const": "air-relative" },
+                "airspeed_mps": { "type": "number", "minimum": 0 },
+                "alpha_deg": { "type": "number" }
+              }
+            }
+          ]
+        },
         "roll_deg": { "type": "number" },
         "pitch_deg": { "type": "number" },
         "heading_deg": { "type": "number" }

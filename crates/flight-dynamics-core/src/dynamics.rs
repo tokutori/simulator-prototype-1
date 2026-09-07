@@ -157,10 +157,23 @@ pub fn aerodynamic_loads(
     let sin_alpha = libm::sin(alpha);
     let cos_alpha = libm::cos(alpha);
     let scale = dynamic_pressure * model.reference_area_m2;
+    let (longitudinal_drag, side) = match model.force_coefficient_basis {
+        crate::ForceCoefficientBasis::WindAxes => {
+            let sin_beta = libm::sin(beta);
+            let cos_beta = libm::cos(beta);
+            (
+                coefficients.drag * cos_beta + coefficients.side * sin_beta,
+                -coefficients.drag * sin_beta + coefficients.side * cos_beta,
+            )
+        }
+        crate::ForceCoefficientBasis::StabilityLiftDragBodySide => {
+            (coefficients.drag, coefficients.side)
+        }
+    };
     let force_body_n = Vec3::new(
-        scale * (coefficients.lift * sin_alpha - coefficients.drag * cos_alpha),
-        scale * coefficients.side,
-        scale * (-coefficients.lift * cos_alpha - coefficients.drag * sin_alpha),
+        scale * (coefficients.lift * sin_alpha - longitudinal_drag * cos_alpha),
+        scale * side,
+        scale * (-coefficients.lift * cos_alpha - longitudinal_drag * sin_alpha),
     );
     let moment_body_nm = Vec3::new(
         scale * model.reference_span_m * coefficients.roll,
@@ -297,6 +310,7 @@ mod tests {
 
     fn model(points: &[AeroPoint]) -> AircraftModel<'_> {
         AircraftModel {
+            force_coefficient_basis: crate::ForceCoefficientBasis::WindAxes,
             mass_kg: 10.0,
             inertia_kg_m2: Inertia {
                 ixx: 2.0,
@@ -311,6 +325,88 @@ mod tests {
             derivatives: AeroDerivatives::default(),
             ground_effect: GroundEffectModel::default(),
         }
+    }
+
+    #[test]
+    fn wind_axis_drag_opposes_velocity_at_nonzero_alpha_and_beta() {
+        let points = [
+            AeroPoint {
+                alpha_rad: -1.0,
+                cl: 0.0,
+                cd: 0.1,
+                cm: 0.0,
+            },
+            AeroPoint {
+                alpha_rad: 1.0,
+                cl: 0.0,
+                cd: 0.1,
+                cm: 0.0,
+            },
+        ];
+        for velocity in [Vec3::new(8.0, 5.0, 3.0), Vec3::new(8.0, -5.0, -3.0)] {
+            let aircraft = model(&points);
+            let loads = aerodynamic_loads(
+                aircraft,
+                RigidBodyState {
+                    position_ned_m: Vec3::ZERO,
+                    velocity_body_mps: velocity,
+                    attitude_body_to_ned: Quaternion::IDENTITY,
+                    rates_body_rad_s: Vec3::ZERO,
+                },
+                ControlSurfaceDeflection::default(),
+                Environment {
+                    density_kg_m3: 1.0,
+                    gravity_mps2: 0.0,
+                    wind_ned_mps: Vec3::ZERO,
+                    ground_effect_enabled: false,
+                },
+            );
+            let expected = velocity * (-0.5 * velocity.norm() * aircraft.reference_area_m2 * 0.1);
+            assert!((loads.force_body_n - expected).norm() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn declared_body_side_derivatives_are_not_rotated_or_counted_twice() {
+        let points = [
+            AeroPoint {
+                alpha_rad: -1.0,
+                cl: 0.0,
+                cd: 0.1,
+                cm: 0.0,
+            },
+            AeroPoint {
+                alpha_rad: 1.0,
+                cl: 0.0,
+                cd: 0.1,
+                cm: 0.0,
+            },
+        ];
+        let mut aircraft = model(&points);
+        aircraft.force_coefficient_basis = crate::ForceCoefficientBasis::StabilityLiftDragBodySide;
+        aircraft.derivatives.cy_beta = -0.2;
+        let velocity = Vec3::new(8.0, 5.0, 3.0);
+        let loads = aerodynamic_loads(
+            aircraft,
+            RigidBodyState {
+                position_ned_m: Vec3::ZERO,
+                velocity_body_mps: velocity,
+                attitude_body_to_ned: Quaternion::IDENTITY,
+                rates_body_rad_s: Vec3::ZERO,
+            },
+            ControlSurfaceDeflection::default(),
+            Environment {
+                density_kg_m3: 1.0,
+                gravity_mps2: 0.0,
+                wind_ned_mps: Vec3::ZERO,
+                ground_effect_enabled: false,
+            },
+        );
+        let scale = 0.5 * velocity.norm() * velocity.norm() * aircraft.reference_area_m2;
+        assert!(
+            (loads.force_body_n.y - scale * -0.2 * libm::asin(5.0 / velocity.norm())).abs()
+                < 1.0e-12
+        );
     }
 
     #[test]

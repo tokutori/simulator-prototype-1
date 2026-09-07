@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.10.0",
+  "schema_version": "0.11.0",
   "metadata": {
     "name": "QX-18-BR-training-envelope-v0.10",
     "provenance": "Real QX-18 geometry plus a fixed-revision BR Simulator behavior reconstruction and datasheet-based avionics profiles",
@@ -135,6 +135,7 @@
     "moment_reference": "BR Simulator centre of mass transformed to body x forward, y right, z down"
   },
   "aerodynamics": {
+    "force_coefficient_basis": "stability-lift-drag-body-side",
     "out_of_range_policy": "terminate",
     "longitudinal_table": [
       { "alpha_deg": -12.0, "cl": -0.620496, "cd": 0.064355, "cm": 0.306213 },
@@ -228,8 +229,7 @@
   },
   "initial_state": {
     "altitude_m": 10.5,
-    "airspeed_mps": 5.0,
-    "alpha_deg": 1.682,
+    "velocity": { "frame": "ground-relative", "speed_mps": 5.0, "flight_path_deg": -3.0, "track_deg": 0.0 },
     "roll_deg": 0.0,
     "pitch_deg": -1.318,
     "heading_deg": 0.0

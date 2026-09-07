@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.10.0",
+  "schema_version": "0.11.0",
   "metadata": {
     "name": "QX-18-public-data-reconstruction-v0.10-strict",
     "provenance": "Real QX-18 geometry plus a fixed-revision public BR Simulator coefficient reconstruction and datasheet-based avionics profiles",
@@ -125,6 +125,7 @@
     "moment_reference": "BR Simulator centre of mass transformed to body x forward, y right, z down"
   },
   "aerodynamics": {
+    "force_coefficient_basis": "stability-lift-drag-body-side",
     "out_of_range_policy": "terminate",
     "longitudinal_table": [
       { "alpha_deg": -5.0, "cl": 0.173688, "cd": 0.021375, "cm": 0.149548 },
@@ -211,8 +212,7 @@
   },
   "initial_state": {
     "altitude_m": 10.5,
-    "airspeed_mps": 9.698,
-    "alpha_deg": 1.682,
+    "velocity": { "frame": "air-relative", "airspeed_mps": 9.698, "alpha_deg": 1.682 },
     "roll_deg": 0.0,
     "pitch_deg": 0.057,
     "heading_deg": 0.0

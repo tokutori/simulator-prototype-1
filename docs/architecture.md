@@ -91,7 +91,7 @@ Inertiaは次のliteral tensor elementである。
 ## Aerodynamic contract
 
 longitudinal base coefficientは`alpha` tableから線形補間する。範囲外policyはmodel contract
-v0.10.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
+v0.11.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
 `aero-envelope-exit`で終了する。`clamp-and-flag`はsoftware test専用であり、endpoint保持に
 よって範囲外modelが妥当になるわけではない。どちらもvalidityをCSVとsummaryへ返す。
 
@@ -103,8 +103,26 @@ Cl = Cl_beta beta + Cl_p p b/(2V) + Cl_r r b/(2V) + Cl_delta_r delta_r
 Cn = Cn_beta beta + Cn_p p b/(2V) + Cn_r r b/(2V) + Cn_delta_r delta_r
 ```
 
-forceはwind axesのlift/dragをbody axesへ変換し、momentはreference `S/b/c`でscaleする。
+force係数のbasisを`force_coefficient_basis`で必須指定する。
+`wind-axes`ではlift/drag/sideを直交wind frameからalpha/betaの両方でbodyへ回転する。
+`stability-lift-drag-body-side`ではCL/CDは縦のstability平面、CYはbodyの全横力であり、
+BRの公開式と同じ小横滑り近似を明示的に維持する。body CYに抗力横成分を追加したり、
+wind-side係数として再回転したりしない。QX-18の二つの再構成は後者、illustrativeは前者。
+両者を同じ係数値のまま交換してはいけない。BR近似は大横滑りの実機validationを意味しない。
+参照: [作者の座標系・横力の定義](https://mtkbirdman.com/unity-aerodynamiccalculator)。
+momentはreference `S/b/c`でscaleする。
 JSONはmoment reference pointを必須metadataとして持つ。
+
+## Release velocity contract
+
+`initial_state.velocity`はtagged unionで、`frame=ground-relative`なら`speed_mps`、
+`flight_path_deg`（上向き正）、`track_deg`（北から東向き正）を指定する。
+機体姿勢とは独立したNED対地速度を構築し、風はその後の対気量にのみ影響する。
+training sampleは人による補助発進の対地5 m/s、飛行経路−3°、北向きを保持する。
+`frame=air-relative`なら`airspeed_mps`と`alpha_deg`を指定し、初期beta=0とする。
+局所風（開始地点のgustを含む）を加えて対地速度を構築する。
+旧v0.10.0の曖昧な`initial_state.airspeed_mps`形式は受理しない。
+nativeと外部controller経路は同一の初期状態生成関数を使う。
 
 ground effectはmodelごとに無効化できる。現在は
 `CD = CD_base + (CGE - 1) k_induced CL^2`だけを適用し、lift、downwash、momentは変えない。

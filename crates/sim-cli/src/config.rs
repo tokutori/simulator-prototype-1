@@ -2,12 +2,12 @@ use std::{fs, path::Path};
 
 use flight_dynamics_core::{
     ActuatorConfig, AeroDerivatives, AeroPoint, AeroTable, AircraftModel, Environment,
-    GroundEffectModel, Inertia, ModelError, SensorModel, Vec3,
+    GroundEffectModel, Inertia, ModelError, Quaternion, RigidBodyState, SensorModel, Vec3,
 };
 use serde::Deserialize;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-const SUPPORTED_SCHEMA_VERSION: &str = "0.10.0";
+const SUPPORTED_SCHEMA_VERSION: &str = "0.11.0";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,10 +74,18 @@ pub struct ReferenceGeometryFile {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AerodynamicsFile {
+    pub force_coefficient_basis: ForceCoefficientBasisFile,
     pub out_of_range_policy: OutOfRangePolicy,
     pub longitudinal_table: Vec<AeroPointFile>,
     pub derivatives_per_rad: DerivativesFile,
     pub ground_effect: GroundEffectFile,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ForceCoefficientBasisFile {
+    WindAxes,
+    StabilityLiftDragBodySide,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,11 +208,25 @@ pub struct OneMinusCosineGustFile {
 #[serde(deny_unknown_fields)]
 pub struct InitialStateFile {
     pub altitude_m: f64,
-    pub airspeed_mps: f64,
-    pub alpha_deg: f64,
+    pub velocity: InitialVelocityFile,
     pub roll_deg: f64,
     pub pitch_deg: f64,
     pub heading_deg: f64,
+}
+
+/// Release velocity has an explicit frame, independently of aircraft attitude.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(tag = "frame", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum InitialVelocityFile {
+    GroundRelative {
+        speed_mps: f64,
+        flight_path_deg: f64,
+        track_deg: f64,
+    },
+    AirRelative {
+        airspeed_mps: f64,
+        alpha_deg: f64,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -334,6 +356,14 @@ impl LoadedSimulation {
         let derivatives = &self.file.aerodynamics.derivatives_per_rad;
         let ground_effect = &self.file.aerodynamics.ground_effect;
         let model = AircraftModel {
+            force_coefficient_basis: match self.file.aerodynamics.force_coefficient_basis {
+                ForceCoefficientBasisFile::WindAxes => {
+                    flight_dynamics_core::ForceCoefficientBasis::WindAxes
+                }
+                ForceCoefficientBasisFile::StabilityLiftDragBodySide => {
+                    flight_dynamics_core::ForceCoefficientBasis::StabilityLiftDragBodySide
+                }
+            },
             mass_kg: self.file.mass_properties.mass_kg,
             inertia_kg_m2: Inertia {
                 ixx: inertia.ixx,
@@ -382,6 +412,45 @@ impl LoadedSimulation {
             gravity_mps2: environment.gravity_mps2,
             wind_ned_mps: array_to_vec3(environment.wind_ned_mps),
             ground_effect_enabled: false,
+        }
+    }
+
+    /// Shared release construction for native and external-controller sessions.
+    pub fn initial_rigid_body_state(&self) -> RigidBodyState {
+        let initial = &self.file.initial_state;
+        let attitude = Quaternion::from_euler(
+            deg_to_rad(initial.roll_deg),
+            deg_to_rad(initial.pitch_deg),
+            deg_to_rad(initial.heading_deg),
+        );
+        let velocity_body_mps = match initial.velocity {
+            InitialVelocityFile::GroundRelative {
+                speed_mps,
+                flight_path_deg,
+                track_deg,
+            } => {
+                let gamma = deg_to_rad(flight_path_deg);
+                let track = deg_to_rad(track_deg);
+                attitude.rotate_ned_to_body(Vec3::new(
+                    speed_mps * gamma.cos() * track.cos(),
+                    speed_mps * gamma.cos() * track.sin(),
+                    -speed_mps * gamma.sin(),
+                ))
+            }
+            InitialVelocityFile::AirRelative {
+                airspeed_mps,
+                alpha_deg,
+            } => {
+                let alpha = deg_to_rad(alpha_deg);
+                Vec3::new(airspeed_mps * alpha.cos(), 0.0, airspeed_mps * alpha.sin())
+                    + attitude.rotate_ned_to_body(self.environment_at_north(0.0).wind_ned_mps)
+            }
+        };
+        RigidBodyState {
+            position_ned_m: Vec3::new(0.0, 0.0, -initial.altitude_m),
+            velocity_body_mps,
+            attitude_body_to_ned: attitude,
+            rates_body_rad_s: Vec3::ZERO,
         }
     }
 
@@ -464,11 +533,8 @@ fn validate_scenario(file: &SimulationFile) -> Result<(), ConfigError> {
     if !initial.altitude_m.is_finite() || initial.altitude_m < 0.0 {
         return Err(ConfigError::InvalidScenario("initial_state.altitude_m"));
     }
-    if !initial.airspeed_mps.is_finite() || initial.airspeed_mps < 0.0 {
-        return Err(ConfigError::InvalidScenario("initial_state.airspeed_mps"));
-    }
+    validate_initial_velocity(initial.velocity)?;
     if [
-        initial.alpha_deg,
         initial.roll_deg,
         initial.pitch_deg,
         initial.heading_deg,
@@ -530,6 +596,31 @@ fn validate_scenario(file: &SimulationFile) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidScenario(
             "reference_controller.failsafe_elevator_deg",
         ));
+    }
+    Ok(())
+}
+
+fn validate_initial_velocity(velocity: InitialVelocityFile) -> Result<(), ConfigError> {
+    let (speed, angles) = match velocity {
+        InitialVelocityFile::GroundRelative {
+            speed_mps,
+            flight_path_deg,
+            track_deg,
+        } => {
+            if !(-90.0..=90.0).contains(&flight_path_deg) {
+                return Err(ConfigError::InvalidScenario(
+                    "initial_state.velocity.flight_path_deg",
+                ));
+            }
+            (speed_mps, [flight_path_deg, track_deg])
+        }
+        InitialVelocityFile::AirRelative {
+            airspeed_mps,
+            alpha_deg,
+        } => (airspeed_mps, [alpha_deg, 0.0]),
+    };
+    if !speed.is_finite() || speed < 0.0 || angles.iter().any(|value| !value.is_finite()) {
+        return Err(ConfigError::InvalidScenario("initial_state.velocity"));
     }
     Ok(())
 }
@@ -597,6 +688,45 @@ mod tests {
     use std::path::Path;
 
     use super::{LoadedSimulation, one_minus_cosine_shape};
+
+    #[test]
+    fn release_velocity_frame_is_explicit_under_wind_and_attitude() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut loaded =
+            LoadedSimulation::load(&repository.join("models/qx18-br-training-envelope.json"))
+                .unwrap();
+        for wind in [[2.0, 1.0, -0.5], [-2.0, -1.0, 0.5]] {
+            loaded.file.environment.wind_ned_mps = wind;
+            loaded.file.initial_state.roll_deg = 7.0;
+            let state = loaded.initial_rigid_body_state();
+            let ground = state
+                .attitude_body_to_ned
+                .rotate_body_to_ned(state.velocity_body_mps);
+            assert!((ground.norm() - 5.0).abs() < 1.0e-12);
+            assert!((ground.z - 5.0 * 3.0_f64.to_radians().sin()).abs() < 1.0e-12);
+            assert!(ground.y.abs() < 1.0e-12);
+        }
+        loaded.file.initial_state.velocity = super::InitialVelocityFile::AirRelative {
+            airspeed_mps: 5.0,
+            alpha_deg: 1.682,
+        };
+        loaded.file.initial_state.heading_deg = 47.0;
+        let state = loaded.initial_rigid_body_state();
+        let relative = state.velocity_body_mps
+            - state
+                .attitude_body_to_ned
+                .rotate_ned_to_body(loaded.environment_at_north(0.0).wind_ned_mps);
+        assert!((relative.norm() - 5.0).abs() < 1.0e-12);
+        assert!((relative.z.atan2(relative.x).to_degrees() - 1.682).abs() < 1.0e-12);
+        assert!(relative.y.abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn release_velocity_rejects_mixed_frame_fields() {
+        assert!(serde_json::from_str::<super::InitialVelocityFile>(
+            r#"{"frame":"ground-relative","speed_mps":5,"flight_path_deg":-3,"track_deg":0,"alpha_deg":1.682}"#
+        ).is_err());
+    }
 
     #[test]
     fn full_one_minus_cosine_pulse_has_zero_endpoints_and_unit_peak() {

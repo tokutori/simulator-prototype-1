@@ -36,7 +36,8 @@ pub use linearization::{
 };
 pub use math::{Quaternion, Vec3};
 pub use model::{
-    AeroDerivatives, AeroPoint, AeroTable, AircraftModel, GroundEffectModel, Inertia, ModelError,
+    AeroDerivatives, AeroPoint, AeroTable, AircraftModel, ForceCoefficientBasis, GroundEffectModel,
+    Inertia, ModelError,
 };
 pub use sensor::{SensorError, SensorModel, SensorSample, SensorSuite};
 pub use trim::{SteadyGlideTrim, TrimError, steady_glide_trim};

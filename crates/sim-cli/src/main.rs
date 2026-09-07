@@ -10,8 +10,8 @@ use std::{
 
 use flight_dynamics_core::{
     Actuator, ActuatorError, AeroLoads, ControlSurfaceDeflection, LongitudinalLinearization,
-    Quaternion, RigidBodyState, SensorError, SensorSample, SensorSuite, StepError, Vec3,
-    aerodynamic_loads, linearize_steady_glide, steady_glide_trim, step_rk4,
+    RigidBodyState, SensorError, SensorSample, SensorSuite, StepError, aerodynamic_loads,
+    linearize_steady_glide, steady_glide_trim, step_rk4,
 };
 use nalgebra::{Complex, SMatrix};
 use plotters::coord::Shift;
@@ -109,22 +109,7 @@ fn simulate(
 ) -> Result<Summary, AppError> {
     let max_steps = calculate_max_steps(duration_s, dt_s)?;
     let model = loaded.model().map_err(AppError::Config)?;
-    let initial = &loaded.file.initial_state;
-    let alpha = deg_to_rad(initial.alpha_deg);
-    let mut state = RigidBodyState {
-        position_ned_m: Vec3::new(0.0, 0.0, -initial.altitude_m),
-        velocity_body_mps: Vec3::new(
-            initial.airspeed_mps * alpha.cos(),
-            0.0,
-            initial.airspeed_mps * alpha.sin(),
-        ),
-        attitude_body_to_ned: Quaternion::from_euler(
-            deg_to_rad(initial.roll_deg),
-            deg_to_rad(initial.pitch_deg),
-            deg_to_rad(initial.heading_deg),
-        ),
-        rates_body_rad_s: Vec3::ZERO,
-    };
+    let mut state = loaded.initial_rigid_body_state();
     let elevator_config = loaded.elevator_config();
     let rudder_config = loaded.rudder_config();
     let controller = &loaded.file.reference_controller;
@@ -1035,8 +1020,11 @@ mod scenario_tests {
         let model_path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../models/qx18-public-reconstruction.json");
         let mut loaded = LoadedSimulation::load(&model_path).expect("sample model must load");
-        loaded.file.initial_state.airspeed_mps = 5.0;
-        loaded.file.initial_state.alpha_deg = 1.682;
+        loaded.file.initial_state.velocity = sim_cli::config::InitialVelocityFile::GroundRelative {
+            speed_mps: 5.0,
+            flight_path_deg: -3.0,
+            track_deg: 0.0,
+        };
         loaded.file.initial_state.pitch_deg = -1.318;
         let mut csv = Vec::new();
         let summary = simulate(&loaded, 8.0, DEFAULT_DT_S, &mut csv)

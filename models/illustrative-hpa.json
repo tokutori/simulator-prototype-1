@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.10.0",
+  "schema_version": "0.11.0",
   "metadata": {
     "name": "illustrative-hpa-rigid-v0",
     "provenance": "Synthetic coefficients for software verification only; not derived from a real Birdman aircraft",
@@ -32,6 +32,7 @@
     "moment_reference": "centre of gravity; body x forward, y right, z down"
   },
   "aerodynamics": {
+    "force_coefficient_basis": "wind-axes",
     "out_of_range_policy": "clamp-and-flag",
     "longitudinal_table": [
       { "alpha_deg": -10.0, "cl": -0.60, "cd": 0.080, "cm": 0.180 },
@@ -123,8 +124,7 @@
   },
   "initial_state": {
     "altitude_m": 10.0,
-    "airspeed_mps": 9.0,
-    "alpha_deg": 8.0,
+    "velocity": { "frame": "air-relative", "airspeed_mps": 9.0, "alpha_deg": 8.0 },
     "roll_deg": 0.0,
     "pitch_deg": 8.0,
     "heading_deg": 0.0

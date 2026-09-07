@@ -15,6 +15,8 @@ export interface PlantObservation {
   sensor_airspeed_mps: number;
   sensor_differential_pressure_pa: number;
   sensor_barometric_altitude_m: number;
+  /** Continuous pressure-derived input; DPS310 alone owns MCU acquisition timing. */
+  sensor_barometric_input_altitude_m: number;
   sensor_alpha_rad: number;
   aero_in_range: boolean;
   surface_contact: boolean;
@@ -217,7 +219,7 @@ export class Dps310Device extends RegisterDevice {
     const fault = this.fault;
     const density = 1.164;
     const gravity = 9.80665;
-    const pressurePa = 100_000 + density * gravity * (10.5 - observation.sensor_barometric_altitude_m);
+    const pressurePa = 100_000 + density * gravity * (10.5 - observation.sensor_barometric_input_altitude_m);
     const scaled = (pressurePa - 100_000) / 10_000;
     const raw = clampI24(Math.round(scaled * 524_288));
     const mode = (this.registers[0x08] ?? 0) & 0x07;

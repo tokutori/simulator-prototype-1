@@ -26,6 +26,9 @@ rate, not the number of plant updates or fault-injection calls. Conversion occur
 only in supported continuous pressure modes. Repeated reads do not create new
 conversions; data-ready clears after the pressure result is consumed. Measurement
 frames explicitly distinguish a new conversion from a held pressure value.
+The MCU device consumes the continuous biased/quantized pressure input, not the
+host simulator's already sampled channel: there is exactly one acquisition clock
+on each execution path, avoiding double sample-and-hold latency.
 
 This remains a scoped device model, not a complete DPS310 implementation (single
 measurement, FIFO, temperature conversion dynamics and all oversampling modes

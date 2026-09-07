@@ -29,6 +29,7 @@ function observation(overrides: Partial<PlantObservation> = {}): PlantObservatio
     sensor_airspeed_mps: 5,
     sensor_differential_pressure_pa: 14.55,
     sensor_barometric_altitude_m: 10.5,
+    sensor_barometric_input_altitude_m: 10.5,
     sensor_alpha_rad: 0,
     aero_in_range: true,
     surface_contact: false,
@@ -157,4 +158,20 @@ test('SDP810 rejects repeated start and requires stop recovery delay', () => {
   assert.equal(device.startRead(), false);
   nowUs += 8000;
   assert.equal(device.startRead(), true);
+});
+
+test('DPS310 samples continuous input, never the host sample-and-hold channel', () => {
+  let nowUs = 0;
+  const device = new Dps310Device(() => nowUs);
+  device.startWrite(); device.writeByte(0x06); device.writeByte(0x50);
+  device.startWrite(); device.writeByte(0x08); device.writeByte(0x07);
+  device.update(observation());
+  nowUs = 31250;
+  const baseline = readRegisters(device, 0, 3);
+  device.update(observation({ sensor_barometric_altitude_m: 100, sensor_barometric_input_altitude_m: 10.5 }));
+  nowUs += 31250;
+  assert.deepEqual(readRegisters(device, 0, 3), baseline);
+  device.update(observation({ sensor_barometric_altitude_m: 10.5, sensor_barometric_input_altitude_m: 9.5 }));
+  nowUs += 31250;
+  assert.notDeepEqual(readRegisters(device, 0, 3), baseline);
 });

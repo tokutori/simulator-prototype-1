@@ -52,3 +52,27 @@ mux, disabled PWM, wrong divider and wrong TOP do not satisfy this contract.
 Analog thresholds, wiring faults, servo power/brownout, cycle-accurate scheduling,
 and physical timing remain outside this virtual-platform validation. Keep
 `timing_validated=false` until physical HIL establishes the relevant timing.
+
+## Blocked I2C transactions and watchdog boundary
+
+The blocking HAL I2C driver can wait indefinitely for hardware completion; a NACK
+fault does not test a stuck transaction. Firmware therefore starts a 40 ms hardware
+watchdog after the intentional 650 ms sensor power-on wait and before sensor
+initialization. Only a completed control iteration feeds it. The selected 40 ms
+prototype budget exceeds the nominal 10 ms control period and initial 20 ms
+settling wait; actual worst-case latency still requires hardware measurement.
+
+On physical watchdog reboot the firmware inhibits automatic rearming and commands
+the declared failsafe outputs. This does not establish that those outputs make
+every flight condition safe, nor validate servo behaviour during reset.
+
+rp2040js implements the actual watchdog timer but its default reset callback only
+logs a warning. Both adapters install a callback that explicitly aborts the
+experiment when that hardware timer requests reset. They do not invent a reset,
+calibration recovery or successful rearm. `i2c-stall` injection deliberately omits
+transaction completion to exercise this path. A real GPIO/I2C/peripheral reset
+sequence and electrical bus release remain outside this simulator's implemented
+reset model and require HIL.
+
+Sources: [RP2040 HAL Watchdog API](https://docs.rs/rp2040-hal/0.12.0/rp2040_hal/watchdog/struct.Watchdog.html),
+[rp2040js 1.3.3 watchdog implementation](https://github.com/wokwi/rp2040js/blob/v1.3.3/src/peripherals/watchdog.ts).

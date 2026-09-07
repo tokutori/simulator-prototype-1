@@ -38,7 +38,8 @@ export type SensorFaultKind =
   | 'sdp-crc'
   | 'sdp-nack'
   | 'dps-stale'
-  | 'dps-not-ready';
+  | 'dps-not-ready'
+  | 'i2c-stall';
 
 abstract class RegisterDevice implements I2cDevice {
   private pointer = 0;

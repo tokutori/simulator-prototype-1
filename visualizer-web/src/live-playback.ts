@@ -9,6 +9,9 @@ export class LivePlayback {
   private cursorS: number | undefined;
   private previousWallMs: number | undefined;
   private rate = 1;
+  private ended = false;
+
+  finish(): void { this.ended = true; }
 
   push(frame: FlightFrame, receivedAtMs: number): void {
     const previous = this.samples.at(-1);
@@ -27,7 +30,7 @@ export class LivePlayback {
     this.previousWallMs = nowMs;
     if (!first || !last || this.cursorS === undefined) return undefined;
     // Prime a two-interval buffer before starting. Under-runs hold, never invent a future pose.
-    if (this.samples.length >= 3 || this.cursorS > first.frame.timeS) {
+    if (this.ended || this.samples.length >= 3 || this.cursorS > first.frame.timeS) {
       this.cursorS = Math.min(last.frame.timeS, this.cursorS + elapsed * this.rate);
     }
     const result = interpolateFrame(this.samples.map(sample => sample.frame), this.cursorS);

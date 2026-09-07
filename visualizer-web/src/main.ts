@@ -474,6 +474,7 @@ function setMode(next: "replay" | "live"): void {
 function dispatch(message: AppMsg): void {
   const [next, effect] = updateApp(appState, message);
   appState = next;
+  if (appState.tag === "mcu-ended" || appState.tag === "mcu-failed") livePlayback.finish();
   renderAppState();
   runEffect(effect);
 }

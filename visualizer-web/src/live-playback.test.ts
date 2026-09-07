@@ -52,3 +52,12 @@ test("long stalls hold real evidence and eventual terminal pose is reached", () 
   for (let now = 1010; now <= 2000; now += 10) playback.frame(now);
   assert.equal(playback.frame(2010)!.timeS, 0.03);
 });
+
+test("terminal records shorter than the prime buffer still drain to their final pose", () => {
+  const playback = new LivePlayback();
+  playback.push(frame(0, 0), 0);
+  playback.push(frame(0.01, 0.1), 10);
+  playback.frame(10);
+  playback.finish();
+  assert.equal(playback.frame(30)!.timeS, 0.01);
+});

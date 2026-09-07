@@ -128,7 +128,8 @@ function animate(nowMs: number): void {
     : "No gamepad detected";
 
   if (isInteractive(appState)) {
-    pilotInput.update(deltaS, gamepad);
+    if (document.hasFocus() && document.visibilityState === "visible") pilotInput.update(deltaS, gamepad);
+    else pilotInput.clear();
     if (socket?.readyState === WebSocket.OPEN && nowMs - lastCommandSentMs >= 40) {
       const command: PilotCommandMessage = {
         pilot_elevator: pilotInput.elevator,
@@ -384,6 +385,7 @@ function bindControls(): void {
       return;
     }
     if (!isFormTarget(event.target)) {
+      if (isControlCode(event.code)) event.preventDefault();
       if (!isControlCode(event.code) && event.code === "KeyV" && !event.repeat) {
         setCameraMode(cameraMode === "cockpit" ? "chase" : "cockpit");
       } else if (!isControlCode(event.code) && event.code === "KeyH" && !event.repeat) {

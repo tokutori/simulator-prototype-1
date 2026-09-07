@@ -22,6 +22,7 @@ import { VRButton } from "three/addons/webxr/VRButton.js";
 import "./style.css";
 import { analysisStorageKey, prepareAnalysisDataset } from "./analysis-data.ts";
 import {
+  acceptsSessionEvent,
   isInteractive,
   present,
   update as updateApp,
@@ -85,7 +86,7 @@ const aircraft = createAircraft();
 scene.add(aircraft.root);
 const environment = buildEnvironment(scene);
 
-let appState: AppState = { tag: "mcu-connecting" };
+let appState: AppState = { tag: "mcu-connecting", sessionId: 0 };
 let xrState: XrState = { tag: "checking" };
 let cameraMode: CameraMode = "chase";
 let cameraModeBeforeXr: CameraMode = "chase";
@@ -111,7 +112,7 @@ initializeWebXr();
 syncSettingsForm();
 setCameraMode("chase");
 renderAppState();
-runEffect({ type: "connect-mcu" });
+runEffect({ type: "connect-mcu", sessionId: appState.sessionId });
 void loadDefaultReplay(false);
 renderer.setAnimationLoop(animate);
 window.addEventListener("resize", resize);
@@ -501,12 +502,12 @@ function renderAppState(): void {
 function runEffect(effect: Effect): void {
   switch (effect.type) {
     case "none": break;
-    case "connect-mcu": connectLive(); break;
+    case "connect-mcu": connectLive(effect.sessionId); break;
     case "disconnect-mcu": disconnectLive(); break;
   }
 }
 
-function connectLive(): void {
+function connectLive(sessionId: number): void {
   disconnectLive();
   liveFrame = undefined;
   liveFrames = [];
@@ -517,25 +518,30 @@ function connectLive(): void {
   setFlightEvent("ACTUAL UF2", "MCU START", "Loading production RP2040 firmware in rp2040js");
   setPhaseBadge("ready");
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  socket = new WebSocket(`${protocol}//${location.host}/live`);
-  socket.addEventListener("open", () => {
+  const connection = new WebSocket(`${protocol}//${location.host}/live`);
+  socket = connection;
+  const isCurrent = (): boolean => socket === connection && acceptsSessionEvent(appState, sessionId);
+  connection.addEventListener("open", () => {
+    if (!isCurrent()) return;
     hideMessage();
   });
-  socket.addEventListener("message", (event) => {
+  connection.addEventListener("message", (event) => {
+    if (!isCurrent()) return;
     try {
       const message = JSON.parse(String(event.data)) as InteractiveObservation | { type: string; message: string };
       if ("type" in message) {
         dispatch(message.type === "ended"
-          ? { type: "mcu-ended", reason: message.message }
-          : { type: "mcu-failed", error: message.message });
+          ? { type: "mcu-ended", sessionId, reason: message.message }
+          : { type: "mcu-failed", sessionId, error: message.message });
         return;
       }
       if (message.backend !== "rp2040js-actual-uf2") {
-        dispatch({ type: "mcu-failed", error: "Rejected telemetry that did not come from actual RP2040 UF2" });
+        dispatch({ type: "mcu-failed", sessionId, error: "Rejected telemetry that did not come from actual RP2040 UF2" });
         return;
       }
       dispatch({
         type: "mcu-telemetry",
+        sessionId,
         performance: {
           processingMs: message.emulation.processing_ms,
           processingAverageMs: message.emulation.processing_average_ms,
@@ -552,25 +558,28 @@ function connectLive(): void {
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
       element<HTMLButtonElement>("open-analysis").disabled = liveFrames.length < 2;
     } catch (error) {
-      showMessage(`Live telemetry error: ${String(error)}`);
+      dispatch({ type: "mcu-failed", sessionId, error: `Live telemetry error: ${String(error)}` });
     }
   });
-  socket.addEventListener("close", () => {
+  connection.addEventListener("close", () => {
+    if (!isCurrent()) return;
     pilotInput.clear();
     if (isInteractive(appState) && appState.tag !== "mcu-ended" && appState.tag !== "mcu-failed") {
-      dispatch({ type: "mcu-failed", error: "actual-UF2 bridge disconnected" });
+      dispatch({ type: "mcu-failed", sessionId, error: "actual-UF2 bridge disconnected" });
     }
   });
-  socket.addEventListener("error", () => dispatch({
-    type: "mcu-failed",
-    error: "Interactive actual-UF2 server is unavailable. Run npm run dev.",
-  }));
+  connection.addEventListener("error", () => {
+    if (!isCurrent()) return;
+    dispatch({ type: "mcu-failed", sessionId,
+      error: "Interactive actual-UF2 server is unavailable. Run npm run dev." });
+  });
 }
 
 function disconnectLive(): void {
   if (socket) {
-    socket.close();
+    const previous = socket;
     socket = undefined;
+    previous.close();
   }
   pilotInput.clear();
 }

@@ -8,41 +8,52 @@ export interface EmulationPerformance {
   timingValidated: false;
 }
 
-export type AppState =
+export type AppState = { sessionId: number } & (
   | { tag: "replay"; sourceName: string }
   | { tag: "mcu-connecting" }
   | { tag: "mcu-running"; performance: EmulationPerformance }
   | { tag: "mcu-too-slow"; performance: EmulationPerformance }
   | { tag: "mcu-ended"; reason: string; performance?: EmulationPerformance }
-  | { tag: "mcu-failed"; error: string };
+  | { tag: "mcu-failed"; error: string });
 
 export type AppMsg =
   | { type: "select-replay"; sourceName: string }
   | { type: "request-mcu" }
-  | { type: "mcu-telemetry"; performance: EmulationPerformance }
-  | { type: "mcu-ended"; reason: string }
-  | { type: "mcu-failed"; error: string };
+  | { type: "mcu-telemetry"; sessionId: number; performance: EmulationPerformance }
+  | { type: "mcu-ended"; sessionId: number; reason: string }
+  | { type: "mcu-failed"; sessionId: number; error: string };
 
-export type Effect = { type: "none" } | { type: "connect-mcu" } | { type: "disconnect-mcu" };
+export type Effect = { type: "none" } | { type: "connect-mcu"; sessionId: number } | { type: "disconnect-mcu" };
+
+/** Terminal states cannot be revived by queued socket events; restart creates a new generation. */
+export function acceptsSessionEvent(state: AppState, sessionId: number): boolean {
+  return state.sessionId === sessionId && (
+    state.tag === "mcu-connecting" || state.tag === "mcu-running" || state.tag === "mcu-too-slow"
+  );
+}
 
 export function update(state: AppState, message: AppMsg): readonly [AppState, Effect] {
+  if ("sessionId" in message && !acceptsSessionEvent(state, message.sessionId)) {
+    return [state, { type: "none" }];
+  }
   switch (message.type) {
     case "select-replay":
-      return [{ tag: "replay", sourceName: message.sourceName }, { type: "disconnect-mcu" }];
+      return [{ tag: "replay", sessionId: state.sessionId, sourceName: message.sourceName }, { type: "disconnect-mcu" }];
     case "request-mcu":
-      return [{ tag: "mcu-connecting" }, { type: "connect-mcu" }];
+      return [{ tag: "mcu-connecting", sessionId: state.sessionId + 1 }, { type: "connect-mcu", sessionId: state.sessionId + 1 }];
     case "mcu-telemetry":
       return [message.performance.realTime && !message.performance.deadlineMissed
-        ? { tag: "mcu-running", performance: message.performance }
-        : { tag: "mcu-too-slow", performance: message.performance }, { type: "none" }];
+        ? { tag: "mcu-running", sessionId: message.sessionId, performance: message.performance }
+        : { tag: "mcu-too-slow", sessionId: message.sessionId, performance: message.performance }, { type: "none" }];
     case "mcu-ended":
       return [{
         tag: "mcu-ended",
+        sessionId: message.sessionId,
         reason: message.reason,
         performance: "performance" in state ? state.performance : undefined,
       }, { type: "none" }];
     case "mcu-failed":
-      return [{ tag: "mcu-failed", error: message.error }, { type: "none" }];
+      return [{ tag: "mcu-failed", sessionId: message.sessionId, error: message.error }, { type: "disconnect-mcu" }];
   }
 }
 

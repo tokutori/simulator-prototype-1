@@ -265,12 +265,12 @@ fn main() -> ! {
     let mut barometric_sample_time_us = 0_u32;
     let mut safety = SurfaceSafetyState::default();
     // BNO055 specifies 650 ms from reset to configuration mode.
-    timer.delay_ms(650);
+    period_wait.wait(650_000);
     // Covers unbounded HAL polling as well as a stalled control loop.
     watchdog.start(fugit::MicrosDurationU32::micros(40_000));
     let mut sensor_runtime = SensorRuntime::initialize(&mut i2c, &mut timer);
     // Covers BNO055 operation-mode transition and first SDP810/DPS310 samples.
-    timer.delay_ms(20);
+    period_wait.wait(20_000);
     let mut previous_update_us = timer.get_counter_low().wrapping_sub(CONTROL_PERIOD_US);
 
     loop {

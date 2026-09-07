@@ -21,6 +21,7 @@ import { loadUf2 } from './uf2.js';
 import { attachServoPwm } from './servo-pwm.js';
 import { installWatchdogMonitor } from './watchdog-monitor.js';
 import { FirmwareTelemetry } from './firmware-telemetry.js';
+import { attachUartRecorder } from './uart-recorder.js';
 
 const commandLine = process.argv.slice(2);
 if (commandLine.includes('--help') || commandLine.includes('-h')) {
@@ -84,9 +85,7 @@ async function main(): Promise<void> {
   const mcu = simulator.rp2040;
   installWatchdogMonitor(mcu);
   const recorder = new FirmwareTelemetry();
-  const uart = mcu.uart[1];
-  if (!uart) throw new Error('required UART1 recorder is missing');
-  uart.onByte = byte => recorder.receive(byte);
+  attachUartRecorder(simulator, byte => recorder.receive(byte));
   mcu.logger = new ConsoleLogger(LogLevel.Error, false);
   loadUf2(uf2Path, mcu);
   const vectorTable = 0x10000100;

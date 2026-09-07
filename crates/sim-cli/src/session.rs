@@ -1,11 +1,36 @@
 //! Stepwise aircraft plant used by external controller and virtual-MCU adapters.
 
-use crate::config::{ConfigError, LoadedSimulation, deg_to_rad};
+use crate::config::{ConfigError, LoadedSimulation, OutOfRangePolicy, deg_to_rad};
 use flight_dynamics_core::{
     Actuator, ActuatorError, ControlSurfaceDeflection, Quaternion, RigidBodyState, SensorError,
     SensorSample, SensorSuite, StepError, Vec3, aerodynamic_loads, step_rk4,
 };
 use serde::Serialize;
+
+/// Physical terminal conditions shared by native and external-controller runs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlantTermination {
+    /// Aircraft reached the reference surface.
+    SurfaceContact,
+    /// Strict aerodynamic data no longer covers the simulated state.
+    AeroEnvelopeExit,
+}
+
+/// Evaluates the same model contract regardless of controller execution platform.
+#[must_use]
+pub fn terminal_condition(
+    surface_contact: bool,
+    aero_in_range: bool,
+    policy: OutOfRangePolicy,
+) -> Option<PlantTermination> {
+    if surface_contact {
+        Some(PlantTermination::SurfaceContact)
+    } else if !aero_in_range && policy == OutOfRangePolicy::Terminate {
+        Some(PlantTermination::AeroEnvelopeExit)
+    } else {
+        None
+    }
+}
 
 /// A serializable plant observation expressed in SI units.
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -48,6 +73,8 @@ pub struct PlantObservation {
     pub sensor_differential_pressure_pa: f64,
     /// Virtual pressure-altimeter output.
     pub sensor_barometric_altitude_m: f64,
+    /// Identity of the held or newly acquired static-pressure sample.
+    pub sensor_barometric_sample_sequence: u32,
     /// Virtual angle-vane output.
     pub sensor_alpha_rad: f64,
     /// Whether the aerodynamic table covers this observation.
@@ -65,6 +92,7 @@ pub struct PlantSession {
     rudder: Actuator,
     sensors: SensorSuite,
     time_s: f64,
+    termination: Option<PlantTermination>,
 }
 
 impl PlantSession {
@@ -122,6 +150,7 @@ impl PlantSession {
             rudder,
             sensors,
             time_s: 0.0,
+            termination: None,
         })
     }
 
@@ -137,6 +166,19 @@ impl PlantSession {
             .loaded
             .environment_at_north(self.state.position_ned_m.x);
         let loads = aerodynamic_loads(model, self.state, self.controls, environment);
+        let aero_in_range = model.longitudinal.contains(loads.condition.alpha_rad);
+        self.termination = self.termination.or_else(|| {
+            terminal_condition(
+                self.state.position_ned_m.z >= 0.0,
+                aero_in_range,
+                self.loaded.file.aerodynamics.out_of_range_policy,
+            )
+        });
+        if self.termination == Some(PlantTermination::AeroEnvelopeExit) {
+            return Err(PlantSessionError::Terminated(
+                PlantTermination::AeroEnvelopeExit,
+            ));
+        }
         let sample = self
             .sensors
             .step(self.state, loads, environment, model.mass_kg, dt_s)
@@ -146,7 +188,7 @@ impl PlantSession {
             self.state,
             self.controls,
             sample,
-            model.longitudinal.contains(loads.condition.alpha_rad),
+            aero_in_range,
         ))
     }
 
@@ -162,6 +204,28 @@ impl PlantSession {
         dt_s: f64,
     ) -> Result<PlantObservation, PlantSessionError> {
         validate_dt(dt_s)?;
+        if let Some(reason) = self.termination {
+            return Err(PlantSessionError::Terminated(reason));
+        }
+        // Validate the initial state too: callers need not call observe before step.
+        let initial_model = self.loaded.model().map_err(PlantSessionError::Config)?;
+        let initial_loads = aerodynamic_loads(
+            initial_model,
+            self.state,
+            self.controls,
+            self.loaded
+                .environment_at_north(self.state.position_ned_m.x),
+        );
+        if let Some(reason) = terminal_condition(
+            self.state.position_ned_m.z >= 0.0,
+            initial_model
+                .longitudinal
+                .contains(initial_loads.condition.alpha_rad),
+            self.loaded.file.aerodynamics.out_of_range_policy,
+        ) {
+            self.termination = Some(reason);
+            return Err(PlantSessionError::Terminated(reason));
+        }
         self.controls.elevator_rad = self
             .elevator
             .step(elevator_command_rad, self.loaded.elevator_config(), dt_s)
@@ -209,6 +273,7 @@ fn observation(
         sensor_airspeed_mps: sample.airspeed_mps,
         sensor_differential_pressure_pa: sample.differential_pressure_pa,
         sensor_barometric_altitude_m: sample.barometric_altitude_m,
+        sensor_barometric_sample_sequence: sample.barometric_sample_sequence,
         sensor_alpha_rad: sample.alpha_rad,
         aero_in_range,
         surface_contact: state.position_ned_m.z >= 0.0,
@@ -244,6 +309,8 @@ pub enum PlantSessionError {
     Step(StepError),
     /// Time step was non-finite or non-positive.
     InvalidTimeStep,
+    /// No further integration is allowed after a physical/model terminal condition.
+    Terminated(PlantTermination),
 }
 
 impl core::fmt::Display for PlantSessionError {
@@ -254,6 +321,7 @@ impl core::fmt::Display for PlantSessionError {
             Self::Sensor(error) => write!(formatter, "sensor error: {error:?}"),
             Self::Step(error) => write!(formatter, "flight-dynamics step error: {error:?}"),
             Self::InvalidTimeStep => write!(formatter, "time step must be finite and positive"),
+            Self::Terminated(reason) => write!(formatter, "plant terminated: {reason:?}"),
         }
     }
 }
@@ -264,6 +332,52 @@ impl std::error::Error for PlantSessionError {}
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn strict_envelope_exit_is_latched_for_external_controllers() {
+        let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/qx18-public-reconstruction.json");
+        let mut loaded = LoadedSimulation::load(&model).expect("model");
+        loaded.file.aerodynamics.out_of_range_policy = OutOfRangePolicy::Terminate;
+        let mut session = PlantSession::new(loaded).expect("session");
+        let mut stopped = false;
+        for _ in 0..1000 {
+            match session.step(0.174_532_925, 0.0, 0.01) {
+                Err(PlantSessionError::Terminated(PlantTermination::AeroEnvelopeExit)) => {
+                    stopped = true;
+                    break;
+                }
+                Ok(observation) => assert!(!observation.surface_contact),
+                other => panic!("unexpected result: {other:?}"),
+            }
+        }
+        assert!(stopped);
+        let stopped_time = session.time_s;
+        assert!(matches!(
+            session.step(0.0, 0.0, 0.01),
+            Err(PlantSessionError::Terminated(
+                PlantTermination::AeroEnvelopeExit
+            ))
+        ));
+        assert_eq!(session.time_s, stopped_time);
+    }
+
+    #[test]
+    fn strict_initial_state_cannot_bypass_observation_check() {
+        let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/qx18-br-training-envelope.json");
+        let mut loaded = LoadedSimulation::load(&model).expect("model");
+        loaded.file.aerodynamics.out_of_range_policy = OutOfRangePolicy::Terminate;
+        loaded.file.initial_state.alpha_deg = 89.0;
+        let mut session = PlantSession::new(loaded).expect("session");
+        assert!(matches!(
+            session.step(0.0, 0.0, 0.01),
+            Err(PlantSessionError::Terminated(
+                PlantTermination::AeroEnvelopeExit
+            ))
+        ));
+        assert_eq!(session.time_s, 0.0);
+    }
 
     #[test]
     fn external_controller_can_advance_the_same_plant_core() {

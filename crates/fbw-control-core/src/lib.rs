@@ -75,6 +75,8 @@ pub struct ControllerInput {
     pub alpha_rad: f32,
     /// Barometric altitude above the launch surface.
     pub barometric_altitude_m: f32,
+    /// Acquisition identity, changed only for a fresh pressure measurement (including equal values).
+    pub barometric_sample_sequence: u32,
 }
 
 /// Controller output and diagnostic estimates for telemetry.
@@ -99,6 +101,7 @@ pub struct ControllerOutput {
 pub struct ControllerState {
     launch_barometric_altitude_m: Option<f32>,
     previous_barometric_altitude_m: Option<f32>,
+    previous_barometric_sample_sequence: Option<u32>,
     barometric_sample_elapsed_s: f32,
     barometric_sample_primed: bool,
     vertical_speed_estimate_valid: bool,
@@ -110,6 +113,15 @@ pub struct ControllerState {
 }
 
 impl ControllerState {
+    /// Clears transient feedback after a sensor fault without moving the launch datum.
+    /// Construct a new default state only when beginning a genuinely new flight.
+    pub fn reset_feedback(&mut self) {
+        *self = Self {
+            launch_barometric_altitude_m: self.launch_barometric_altitude_m,
+            ..Self::default()
+        };
+    }
+
     /// Advances the controller by one measurement interval.
     #[must_use]
     pub fn step(
@@ -127,10 +139,12 @@ impl ControllerState {
         match self.previous_barometric_altitude_m {
             None => {
                 self.previous_barometric_altitude_m = Some(input.barometric_altitude_m);
+                self.previous_barometric_sample_sequence = Some(input.barometric_sample_sequence);
                 self.barometric_sample_elapsed_s = 0.0;
             }
             Some(previous_altitude_m)
-                if input.barometric_altitude_m != previous_altitude_m
+                if self.previous_barometric_sample_sequence
+                    != Some(input.barometric_sample_sequence)
                     && self.barometric_sample_elapsed_s > 0.0 =>
             {
                 if self.barometric_sample_primed {
@@ -144,11 +158,12 @@ impl ControllerState {
                         * (raw_vertical_speed_mps - self.filtered_vertical_speed_mps);
                     self.vertical_speed_estimate_valid = true;
                 } else {
-                    // The first distinct sample may follow an arbitrarily long
+                    // The first fresh sample may follow an arbitrarily long
                     // frozen preflight interval, so it only primes the time base.
                     self.barometric_sample_primed = true;
                 }
                 self.previous_barometric_altitude_m = Some(input.barometric_altitude_m);
+                self.previous_barometric_sample_sequence = Some(input.barometric_sample_sequence);
                 self.barometric_sample_elapsed_s = 0.0;
             }
             Some(_) => {}
@@ -359,6 +374,7 @@ mod tests {
             airspeed_valid: true,
             alpha_rad: alpha_deg.to_radians(),
             barometric_altitude_m: 10.0,
+            barometric_sample_sequence: 0,
         }
     }
 
@@ -392,8 +408,10 @@ mod tests {
         let first = state.step(&config(), input(9.0, -1.0, 2.0), 0.01);
         let mut climbed = input(9.0, -1.0, 2.0);
         climbed.barometric_altitude_m = 10.01;
+        climbed.barometric_sample_sequence = 1;
         let second = state.step(&config(), climbed, 0.01);
         climbed.barometric_altitude_m = 10.02;
+        climbed.barometric_sample_sequence = 2;
         let third = state.step(&config(), climbed, 0.01);
 
         assert!(!first.vertical_speed_estimate_valid);
@@ -409,8 +427,10 @@ mod tests {
         let mut sample = input(9.0, -1.0, 2.0);
         let _ = state.step(&config(), sample, 0.01);
         sample.barometric_altitude_m = 10.01;
+        sample.barometric_sample_sequence = 1;
         let _ = state.step(&config(), sample, 0.03);
         sample.barometric_altitude_m = 10.02;
+        sample.barometric_sample_sequence = 2;
         let updated = state.step(&config(), sample, 0.03);
         let held = state.step(&config(), sample, 0.01);
 
@@ -419,6 +439,59 @@ mod tests {
             held.estimated_vertical_speed_mps,
             updated.estimated_vertical_speed_mps
         );
+    }
+
+    #[test]
+    fn fresh_equal_altitudes_decay_climb_but_held_samples_do_not() {
+        let mut state = ControllerState::default();
+        let mut sample = input(9.0, -1.0, 2.0);
+        let _ = state.step(&config(), sample, 0.01);
+        sample.barometric_sample_sequence = 1;
+        let _ = state.step(&config(), sample, 0.03);
+        sample.barometric_sample_sequence = 2;
+        sample.barometric_altitude_m = 10.03;
+        let climbed = state.step(&config(), sample, 0.03);
+        let held = state.step(&config(), sample, 0.01);
+        assert_eq!(
+            climbed.estimated_vertical_speed_mps,
+            held.estimated_vertical_speed_mps
+        );
+        sample.barometric_sample_sequence = 3;
+        let level = state.step(&config(), sample, 0.02);
+        assert!(level.vertical_speed_estimate_valid);
+        assert!(level.estimated_vertical_speed_mps < held.estimated_vertical_speed_mps);
+        for sequence in 4..100 {
+            sample.barometric_sample_sequence = sequence;
+            let _ = state.step(&config(), sample, 0.03);
+        }
+        assert!(state.filtered_vertical_speed_mps.abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn sequence_wrap_is_a_fresh_measurement() {
+        let mut state = ControllerState::default();
+        let mut sample = input(9.0, -1.0, 2.0);
+        sample.barometric_sample_sequence = u32::MAX - 1;
+        let _ = state.step(&config(), sample, 0.03);
+        sample.barometric_sample_sequence = u32::MAX;
+        let _ = state.step(&config(), sample, 0.03);
+        sample.barometric_sample_sequence = 0;
+        assert!(
+            state
+                .step(&config(), sample, 0.03)
+                .vertical_speed_estimate_valid
+        );
+    }
+
+    #[test]
+    fn recovery_preserves_launch_altitude_datum() {
+        let mut state = ControllerState::default();
+        let mut sample = input(5.0, -8.0, 2.0);
+        sample.airspeed_valid = false;
+        let _ = state.step(&config(), sample, 0.01);
+        state.reset_feedback();
+        sample.barometric_altitude_m = 8.0;
+        assert_eq!(state.step(&config(), sample, 0.01).pull_out_blend, 1.0);
     }
 
     #[test]

@@ -16,8 +16,9 @@ use flight_dynamics_core::{
 use nalgebra::{Complex, SMatrix};
 use plotters::coord::Shift;
 use plotters::prelude::*;
-use sim_cli::config::{ConfigError, LoadedSimulation, OutOfRangePolicy, deg_to_rad, rad_to_deg};
+use sim_cli::config::{ConfigError, LoadedSimulation, deg_to_rad, rad_to_deg};
 use sim_cli::controller::{ControlDecision, ReferenceControllerState};
+use sim_cli::session::{PlantTermination, terminal_condition};
 
 const DEFAULT_MODEL: &str = "models/qx18-br-training-envelope.json";
 // A 120 s horizon covers about 1.2 km at the nominal 10 m/s glide speed.
@@ -177,13 +178,15 @@ fn simulate(
         };
         write_sample(writer, &sample)?;
         samples.push(sample);
-        if state.position_ned_m.z >= 0.0 {
-            break Termination::SurfaceContact;
-        }
-        if !aero_in_range
-            && loaded.file.aerodynamics.out_of_range_policy == OutOfRangePolicy::Terminate
-        {
-            break Termination::AeroEnvelopeExit;
+        if let Some(reason) = terminal_condition(
+            state.position_ned_m.z >= 0.0,
+            aero_in_range,
+            loaded.file.aerodynamics.out_of_range_policy,
+        ) {
+            break match reason {
+                PlantTermination::SurfaceContact => Termination::SurfaceContact,
+                PlantTermination::AeroEnvelopeExit => Termination::AeroEnvelopeExit,
+            };
         }
         if steps >= max_steps {
             break Termination::Duration;

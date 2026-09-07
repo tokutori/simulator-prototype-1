@@ -132,6 +132,7 @@ impl InteractiveController {
                         airspeed_valid: true,
                         alpha_rad: observation.sensor_alpha_rad as f32,
                         barometric_altitude_m: observation.sensor_barometric_altitude_m as f32,
+                        barometric_sample_sequence: observation.sensor_barometric_sample_sequence,
                     },
                     dt_s as f32,
                 )

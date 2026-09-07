@@ -27,6 +27,7 @@ impl ReferenceControllerState {
                 airspeed_valid: true,
                 alpha_rad: sensors.alpha_rad as f32,
                 barometric_altitude_m: sensors.barometric_altitude_m as f32,
+                barometric_sample_sequence: sensors.barometric_sample_sequence,
             },
             dt_s as f32,
         )

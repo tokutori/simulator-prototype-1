@@ -74,6 +74,8 @@ pub struct SensorSample {
     pub differential_pressure_pa: f64,
     /// Barometric altitude relative to standard sea-level pressure.
     pub barometric_altitude_m: f64,
+    /// Wrapping acquisition identity; advances even when quantized pressure is unchanged.
+    pub barometric_sample_sequence: u32,
     /// Quantized angle of attack.
     pub alpha_rad: f64,
 }
@@ -249,6 +251,8 @@ impl SensorSuite {
     }
 
     fn capture_static_pressure(&mut self, state: RigidBodyState) {
+        self.sample.barometric_sample_sequence =
+            self.sample.barometric_sample_sequence.wrapping_add(1);
         let altitude_m = -state.position_ned_m.z;
         let static_pressure =
             pressure_from_altitude(altitude_m) + self.model.static_pressure_bias_pa;
@@ -412,5 +416,23 @@ mod tests {
             .step(changed_state, loads, environment, 10.0, 0.01)
             .expect("valid sample");
         assert!(static_pressure_updated.barometric_altitude_m > 19.9);
+        assert_eq!(
+            static_pressure_updated.barometric_sample_sequence,
+            initial.barometric_sample_sequence + 1
+        );
+        let mut equal_pressure = static_pressure_updated;
+        for _ in 0..4 {
+            equal_pressure = suite
+                .step(changed_state, loads, environment, 10.0, 0.01)
+                .expect("fresh equal pressure");
+        }
+        assert_eq!(
+            equal_pressure.barometric_altitude_m,
+            static_pressure_updated.barometric_altitude_m
+        );
+        assert_eq!(
+            equal_pressure.barometric_sample_sequence,
+            static_pressure_updated.barometric_sample_sequence + 1
+        );
     }
 }

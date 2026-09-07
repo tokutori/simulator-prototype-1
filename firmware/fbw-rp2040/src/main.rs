@@ -14,7 +14,7 @@ use embedded_hal::{
 };
 use fbw_control_core::{ControllerInput, ControllerState};
 use fbw_input_core::{ButtonPair, RawPilotInput, blend, decode};
-use fbw_safety_core::{SafetyConfig, SafetyMode, SafetyState};
+use fbw_safety_core::{SafetyConfig, SafetyMode, SurfaceCommands, SurfaceSafetyState};
 use fugit::RateExtU32;
 use panic_halt as _;
 use qx18_fbw_config::{QX18_FAILSAFE_ELEVATOR_RAD, QX18_TRAINING_CONTROLLER};
@@ -251,15 +251,19 @@ fn main() -> ! {
     let mut record_sequence = 0_u32;
     let mut controller = ControllerState::default();
     let mut barometric_sample_sequence = 0_u32;
-    let mut safety = SafetyState::default();
+    let mut barometric_sample_time_us = 0_u32;
+    let mut safety = SurfaceSafetyState::default();
     // BNO055 specifies 650 ms from reset to configuration mode.
     timer.delay_ms(650);
     let mut sensor_runtime = SensorRuntime::initialize(&mut i2c, &mut timer);
     // Covers BNO055 operation-mode transition and first SDP810/DPS310 samples.
     timer.delay_ms(20);
+    let mut previous_update_us = timer.get_counter_low().wrapping_sub(CONTROL_PERIOD_US);
 
     loop {
         let update_start_us = timer.get_counter_low();
+        let update_dt_s = update_start_us.wrapping_sub(previous_update_us) as f32 * 1.0e-6;
+        previous_update_us = update_start_us;
         control_tick_high = !control_tick_high;
         if control_tick_high {
             let _ = control_tick.set_high();
@@ -281,6 +285,7 @@ fn main() -> ! {
             .is_some_and(|frame| frame.pressure_sample_fresh)
         {
             barometric_sample_sequence = barometric_sample_sequence.wrapping_add(1);
+            barometric_sample_time_us = timer.get_counter_low();
         }
         let automatic_elevator = measurement_frame.map(|frame| {
             let measurement = frame.measurements;
@@ -295,8 +300,9 @@ fn main() -> ! {
                         alpha_rad: measurement.alpha_rad,
                         barometric_altitude_m: measurement.barometric_altitude_m,
                         barometric_sample_sequence,
+                        barometric_sample_time_us,
                     },
-                    CONTROL_PERIOD_US as f32 * 1.0e-6,
+                    update_dt_s,
                 )
                 .elevator_command_rad
         });
@@ -306,7 +312,14 @@ fn main() -> ! {
                 + 0.35 * measurement.yaw_rate_rad_s)
                 .clamp(-SURFACE_LIMIT_RAD, SURFACE_LIMIT_RAD)
         });
-        let safe = safety.step(&SAFETY_CONFIG, automatic_elevator);
+        let safe = safety.step(
+            &SAFETY_CONFIG,
+            0.0,
+            automatic_elevator.map(|elevator_rad| SurfaceCommands {
+                elevator_rad,
+                rudder_rad: automatic_rudder,
+            }),
+        );
         if safe.reset_controller {
             controller.reset_feedback();
         }
@@ -325,14 +338,14 @@ fn main() -> ! {
         });
         let elevator_command = blend(
             pilot.elevator * SURFACE_LIMIT_RAD,
-            safe.command_rad,
+            safe.commands.elevator_rad,
             pilot.autonomy,
             SURFACE_LIMIT_RAD,
         );
         // QX-18's reconstructed Cn_delta_r is negative: a right-yaw demand uses negative rudder.
         let rudder_command = blend(
             -pilot.rudder * SURFACE_LIMIT_RAD,
-            automatic_rudder,
+            safe.commands.rudder_rad,
             pilot.autonomy,
             SURFACE_LIMIT_RAD,
         );
@@ -363,7 +376,7 @@ fn main() -> ! {
                     pilot.autonomy,
                     automatic_elevator.unwrap_or(0.0),
                     automatic_rudder,
-                    safe.command_rad,
+                    safe.commands.elevator_rad,
                     elevator_command,
                     rudder_command,
                 ],

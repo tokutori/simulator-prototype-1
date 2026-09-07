@@ -133,6 +133,7 @@ impl InteractiveController {
                         alpha_rad: observation.sensor_alpha_rad as f32,
                         barometric_altitude_m: observation.sensor_barometric_altitude_m as f32,
                         barometric_sample_sequence: observation.sensor_barometric_sample_sequence,
+                        barometric_sample_time_us: observation.sensor_barometric_sample_time_us,
                     },
                     dt_s as f32,
                 )

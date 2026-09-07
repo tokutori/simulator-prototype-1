@@ -144,9 +144,79 @@ impl SafetyState {
     }
 }
 
+/// Simultaneous automatic demands. Manual blending belongs after this gate so
+/// loss of automatic sensing never removes explicitly selected manual control.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SurfaceCommands {
+    /// Elevator demand, positive nose-down.
+    pub elevator_rad: f32,
+    /// Rudder demand in the aircraft model convention.
+    pub rudder_rad: f32,
+}
+
+/// Two-axis result governed by one shared validity window.
+#[derive(Clone, Copy, Debug)]
+pub struct SurfaceSafetyOutput {
+    /// Commands after applying hold/arming/failsafe to both axes.
+    pub commands: SurfaceCommands,
+    /// Shared sensor-validity mode.
+    pub mode: SafetyMode,
+    /// Whether transient feedback should be reset.
+    pub reset_controller: bool,
+}
+
+/// One safety state machine for all automatic control surfaces.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SurfaceSafetyState {
+    gate: SafetyState,
+    last_rudder_rad: f32,
+}
+
+impl SurfaceSafetyState {
+    /// Whether the automatic controller needs clean transient feedback.
+    #[must_use]
+    pub const fn controller_should_start_clean(&self) -> bool {
+        self.gate.controller_should_start_clean()
+    }
+
+    /// Both axes arm, hold, fail and recover together. A non-finite demand on
+    /// either axis invalidates the whole automatic candidate.
+    #[must_use]
+    pub fn step(
+        &mut self,
+        config: &SafetyConfig,
+        rudder_failsafe_rad: f32,
+        candidate: Option<SurfaceCommands>,
+    ) -> SurfaceSafetyOutput {
+        let candidate = candidate
+            .filter(|value| value.elevator_rad.is_finite() && value.rudder_rad.is_finite());
+        let elevator = self
+            .gate
+            .step(config, candidate.map(|value| value.elevator_rad));
+        let rudder_rad = match elevator.mode {
+            SafetyMode::Active => {
+                if let Some(value) = candidate {
+                    self.last_rudder_rad = value.rudder_rad;
+                }
+                self.last_rudder_rad
+            }
+            SafetyMode::HoldLast => self.last_rudder_rad,
+            SafetyMode::Arming | SafetyMode::Failsafe => rudder_failsafe_rad,
+        };
+        SurfaceSafetyOutput {
+            commands: SurfaceCommands {
+                elevator_rad: elevator.command_rad,
+                rudder_rad,
+            },
+            mode: elevator.mode,
+            reset_controller: elevator.reset_controller,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SafetyConfig, SafetyMode, SafetyState};
+    use super::{SafetyConfig, SafetyMode, SafetyState, SurfaceCommands, SurfaceSafetyState};
 
     const CONFIG: SafetyConfig = SafetyConfig {
         startup_valid_samples: 3,
@@ -154,6 +224,46 @@ mod tests {
         recovery_valid_samples: 4,
         failsafe_command_rad: 0.0,
     };
+
+    #[test]
+    fn both_axes_share_arming_hold_failsafe_and_recovery() {
+        let mut state = SurfaceSafetyState::default();
+        let old = SurfaceCommands {
+            elevator_rad: 0.1,
+            rudder_rad: 0.2,
+        };
+        let new = SurfaceCommands {
+            elevator_rad: -0.1,
+            rudder_rad: -0.2,
+        };
+        for _ in 0..2 {
+            let output = state.step(&CONFIG, 0.0, Some(old));
+            assert_eq!(output.mode, SafetyMode::Arming);
+            assert_eq!(output.commands, SurfaceCommands::default());
+        }
+        assert_eq!(state.step(&CONFIG, 0.0, Some(old)).commands, old);
+        for _ in 0..2 {
+            let output = state.step(&CONFIG, 0.0, None);
+            assert_eq!(output.mode, SafetyMode::HoldLast);
+            assert_eq!(output.commands, old);
+        }
+        let failed = state.step(&CONFIG, 0.0, None);
+        assert_eq!(failed.mode, SafetyMode::Failsafe);
+        assert_eq!(failed.commands, SurfaceCommands::default());
+        for _ in 0..3 {
+            let output = state.step(&CONFIG, 0.0, Some(new));
+            assert_eq!(output.mode, SafetyMode::Failsafe);
+            assert_eq!(output.commands, SurfaceCommands::default());
+        }
+        assert_eq!(state.step(&CONFIG, 0.0, Some(new)).commands, new);
+        let invalid = SurfaceCommands {
+            rudder_rad: f32::NAN,
+            ..new
+        };
+        let held = state.step(&CONFIG, 0.0, Some(invalid));
+        assert_eq!(held.mode, SafetyMode::HoldLast);
+        assert_eq!(held.commands, new);
+    }
 
     #[test]
     fn startup_requires_a_consecutive_valid_window() {

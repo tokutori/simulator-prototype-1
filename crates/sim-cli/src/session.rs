@@ -73,8 +73,12 @@ pub struct PlantObservation {
     pub sensor_differential_pressure_pa: f64,
     /// Virtual pressure-altimeter output.
     pub sensor_barometric_altitude_m: f64,
+    /// Continuous biased/quantized source before the host sample-and-hold clock.
+    pub sensor_barometric_input_altitude_m: f64,
     /// Identity of the held or newly acquired static-pressure sample.
     pub sensor_barometric_sample_sequence: u32,
+    /// Wrapping microsecond acquisition timestamp held with the pressure sample.
+    pub sensor_barometric_sample_time_us: u32,
     /// Virtual angle-vane output.
     pub sensor_alpha_rad: f64,
     /// Whether the aerodynamic table covers this observation.
@@ -188,6 +192,7 @@ impl PlantSession {
             self.state,
             self.controls,
             sample,
+            self.sensors.static_pressure_input_altitude_m(self.state),
             aero_in_range,
         ))
     }
@@ -250,6 +255,7 @@ fn observation(
     state: RigidBodyState,
     controls: ControlSurfaceDeflection,
     sample: SensorSample,
+    barometric_input_altitude_m: f64,
     aero_in_range: bool,
 ) -> PlantObservation {
     let euler = state.attitude_body_to_ned.to_euler();
@@ -273,7 +279,9 @@ fn observation(
         sensor_airspeed_mps: sample.airspeed_mps,
         sensor_differential_pressure_pa: sample.differential_pressure_pa,
         sensor_barometric_altitude_m: sample.barometric_altitude_m,
+        sensor_barometric_input_altitude_m: barometric_input_altitude_m,
         sensor_barometric_sample_sequence: sample.barometric_sample_sequence,
+        sensor_barometric_sample_time_us: sample.barometric_sample_time_us,
         sensor_alpha_rad: sample.alpha_rad,
         aero_in_range,
         surface_contact: state.position_ned_m.z >= 0.0,

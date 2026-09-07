@@ -28,6 +28,7 @@ impl ReferenceControllerState {
                 alpha_rad: sensors.alpha_rad as f32,
                 barometric_altitude_m: sensors.barometric_altitude_m as f32,
                 barometric_sample_sequence: sensors.barometric_sample_sequence,
+                barometric_sample_time_us: sensors.barometric_sample_time_us,
             },
             dt_s as f32,
         )

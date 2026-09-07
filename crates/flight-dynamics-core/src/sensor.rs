@@ -76,6 +76,8 @@ pub struct SensorSample {
     pub barometric_altitude_m: f64,
     /// Wrapping acquisition identity; advances even when quantized pressure is unchanged.
     pub barometric_sample_sequence: u32,
+    /// Monotonic wrapping microsecond acquisition timestamp held with static pressure.
+    pub barometric_sample_time_us: u32,
     /// Quantized angle of attack.
     pub alpha_rad: f64,
 }
@@ -129,6 +131,7 @@ impl SampleClock {
 /// Explicit state for deterministic sensor replay.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SensorSuite {
+    elapsed_time_s: f64,
     model: SensorModel,
     imu_clock: SampleClock,
     differential_pressure_clock: SampleClock,
@@ -149,6 +152,7 @@ impl SensorSuite {
     pub fn new(model: SensorModel) -> Result<Self, SensorError> {
         validate_model(model)?;
         Ok(Self {
+            elapsed_time_s: 0.0,
             model,
             imu_clock: SampleClock::new(model.imu_sample_period_s),
             differential_pressure_clock: SampleClock::new(
@@ -187,6 +191,9 @@ impl SensorSuite {
             return Err(SensorError::InvalidInput);
         }
 
+        if self.differential_pressure_initialized {
+            self.elapsed_time_s += dt_s;
+        }
         let target_dp = self.model.pitot_coefficient * loads.condition.dynamic_pressure_pa;
         if self.differential_pressure_initialized {
             let response_fraction =
@@ -250,14 +257,26 @@ impl SensorSuite {
         );
     }
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn capture_static_pressure(&mut self, state: RigidBodyState) {
+        self.sample.barometric_sample_time_us =
+            (libm::round(self.elapsed_time_s * 1.0e6) % 4_294_967_296.0) as u32;
         self.sample.barometric_sample_sequence =
             self.sample.barometric_sample_sequence.wrapping_add(1);
+        self.sample.barometric_altitude_m = self.static_pressure_input_altitude_m(state);
+    }
+
+    /// Continuous pressure-transducer input expressed as barometric altitude.
+    /// Includes the configured pressure bias and quantum, but no sample-and-hold.
+    /// A virtual register device owns its own acquisition clock and uses this
+    /// input instead of sampling an already-held host sensor a second time.
+    #[must_use]
+    pub fn static_pressure_input_altitude_m(&self, state: RigidBodyState) -> f64 {
         let altitude_m = -state.position_ned_m.z;
         let static_pressure =
             pressure_from_altitude(altitude_m) + self.model.static_pressure_bias_pa;
         let measured_pressure = quantize(static_pressure, self.model.static_pressure_resolution_pa);
-        self.sample.barometric_altitude_m = altitude_from_pressure(measured_pressure);
+        altitude_from_pressure(measured_pressure)
     }
 
     fn capture_alpha(&mut self, loads: AeroLoads) {

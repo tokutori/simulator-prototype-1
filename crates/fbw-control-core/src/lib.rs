@@ -77,6 +77,8 @@ pub struct ControllerInput {
     pub barometric_altitude_m: f32,
     /// Acquisition identity, changed only for a fresh pressure measurement (including equal values).
     pub barometric_sample_sequence: u32,
+    /// Monotonic acquisition time in microseconds, held with the sample; wraps at `u32::MAX`.
+    pub barometric_sample_time_us: u32,
 }
 
 /// Controller output and diagnostic estimates for telemetry.
@@ -102,7 +104,7 @@ pub struct ControllerState {
     launch_barometric_altitude_m: Option<f32>,
     previous_barometric_altitude_m: Option<f32>,
     previous_barometric_sample_sequence: Option<u32>,
-    barometric_sample_elapsed_s: f32,
+    previous_barometric_sample_time_us: u32,
     barometric_sample_primed: bool,
     vertical_speed_estimate_valid: bool,
     filtered_vertical_speed_mps: f32,
@@ -124,6 +126,7 @@ impl ControllerState {
 
     /// Advances the controller by one measurement interval.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)] // f32 microsecond intervals match MCU arithmetic.
     pub fn step(
         &mut self,
         config: &ControllerConfig,
@@ -133,27 +136,32 @@ impl ControllerState {
         let launch_barometric_altitude_m = *self
             .launch_barometric_altitude_m
             .get_or_insert(input.barometric_altitude_m);
-        if dt_s.is_finite() && dt_s > 0.0 {
-            self.barometric_sample_elapsed_s += dt_s;
-        }
+        let clock_delta = input
+            .barometric_sample_time_us
+            .wrapping_sub(self.previous_barometric_sample_time_us);
+        // Acquisition intervals must be shorter than half the wrapping clock range.
+        // A backwards/restarted timestamp must not become a huge positive interval.
+        let sample_elapsed_s = if clock_delta < (1 << 31) {
+            clock_delta as f32 * 1.0e-6
+        } else {
+            0.0
+        };
         match self.previous_barometric_altitude_m {
             None => {
                 self.previous_barometric_altitude_m = Some(input.barometric_altitude_m);
                 self.previous_barometric_sample_sequence = Some(input.barometric_sample_sequence);
-                self.barometric_sample_elapsed_s = 0.0;
+                self.previous_barometric_sample_time_us = input.barometric_sample_time_us;
             }
             Some(previous_altitude_m)
                 if self.previous_barometric_sample_sequence
                     != Some(input.barometric_sample_sequence)
-                    && self.barometric_sample_elapsed_s > 0.0 =>
+                    && sample_elapsed_s > 0.0 =>
             {
                 if self.barometric_sample_primed {
-                    let raw_vertical_speed_mps = (input.barometric_altitude_m
-                        - previous_altitude_m)
-                        / self.barometric_sample_elapsed_s;
-                    let response_fraction = self.barometric_sample_elapsed_s
-                        / (config.vertical_speed_filter_time_constant_s
-                            + self.barometric_sample_elapsed_s);
+                    let raw_vertical_speed_mps =
+                        (input.barometric_altitude_m - previous_altitude_m) / sample_elapsed_s;
+                    let response_fraction = sample_elapsed_s
+                        / (config.vertical_speed_filter_time_constant_s + sample_elapsed_s);
                     self.filtered_vertical_speed_mps += response_fraction
                         * (raw_vertical_speed_mps - self.filtered_vertical_speed_mps);
                     self.vertical_speed_estimate_valid = true;
@@ -164,7 +172,7 @@ impl ControllerState {
                 }
                 self.previous_barometric_altitude_m = Some(input.barometric_altitude_m);
                 self.previous_barometric_sample_sequence = Some(input.barometric_sample_sequence);
-                self.barometric_sample_elapsed_s = 0.0;
+                self.previous_barometric_sample_time_us = input.barometric_sample_time_us;
             }
             Some(_) => {}
         }
@@ -375,6 +383,7 @@ mod tests {
             alpha_rad: alpha_deg.to_radians(),
             barometric_altitude_m: 10.0,
             barometric_sample_sequence: 0,
+            barometric_sample_time_us: 0,
         }
     }
 
@@ -409,9 +418,11 @@ mod tests {
         let mut climbed = input(9.0, -1.0, 2.0);
         climbed.barometric_altitude_m = 10.01;
         climbed.barometric_sample_sequence = 1;
+        climbed.barometric_sample_time_us = 10_000;
         let second = state.step(&config(), climbed, 0.01);
         climbed.barometric_altitude_m = 10.02;
         climbed.barometric_sample_sequence = 2;
+        climbed.barometric_sample_time_us = 20_000;
         let third = state.step(&config(), climbed, 0.01);
 
         assert!(!first.vertical_speed_estimate_valid);
@@ -428,9 +439,11 @@ mod tests {
         let _ = state.step(&config(), sample, 0.01);
         sample.barometric_altitude_m = 10.01;
         sample.barometric_sample_sequence = 1;
+        sample.barometric_sample_time_us = 30_000;
         let _ = state.step(&config(), sample, 0.03);
         sample.barometric_altitude_m = 10.02;
         sample.barometric_sample_sequence = 2;
+        sample.barometric_sample_time_us = 60_000;
         let updated = state.step(&config(), sample, 0.03);
         let held = state.step(&config(), sample, 0.01);
 
@@ -447,8 +460,10 @@ mod tests {
         let mut sample = input(9.0, -1.0, 2.0);
         let _ = state.step(&config(), sample, 0.01);
         sample.barometric_sample_sequence = 1;
+        sample.barometric_sample_time_us = 30_000;
         let _ = state.step(&config(), sample, 0.03);
         sample.barometric_sample_sequence = 2;
+        sample.barometric_sample_time_us = 60_000;
         sample.barometric_altitude_m = 10.03;
         let climbed = state.step(&config(), sample, 0.03);
         let held = state.step(&config(), sample, 0.01);
@@ -457,11 +472,13 @@ mod tests {
             held.estimated_vertical_speed_mps
         );
         sample.barometric_sample_sequence = 3;
+        sample.barometric_sample_time_us = 90_000;
         let level = state.step(&config(), sample, 0.02);
         assert!(level.vertical_speed_estimate_valid);
         assert!(level.estimated_vertical_speed_mps < held.estimated_vertical_speed_mps);
         for sequence in 4..100 {
             sample.barometric_sample_sequence = sequence;
+            sample.barometric_sample_time_us = sequence * 30_000;
             let _ = state.step(&config(), sample, 0.03);
         }
         assert!(state.filtered_vertical_speed_mps.abs() < 1.0e-6);
@@ -472,14 +489,40 @@ mod tests {
         let mut state = ControllerState::default();
         let mut sample = input(9.0, -1.0, 2.0);
         sample.barometric_sample_sequence = u32::MAX - 1;
+        sample.barometric_sample_time_us = u32::MAX - 30_000;
         let _ = state.step(&config(), sample, 0.03);
         sample.barometric_sample_sequence = u32::MAX;
+        sample.barometric_sample_time_us = u32::MAX;
         let _ = state.step(&config(), sample, 0.03);
         sample.barometric_sample_sequence = 0;
+        sample.barometric_sample_time_us = 29_999;
         assert!(
             state
                 .step(&config(), sample, 0.03)
                 .vertical_speed_estimate_valid
+        );
+    }
+
+    #[test]
+    fn altitude_derivative_uses_acquisition_time_not_controller_calls() {
+        let mut state = ControllerState::default();
+        let mut sample = input(9.0, -1.0, 2.0);
+        let _ = state.step(&config(), sample, 0.01);
+        sample.barometric_sample_sequence = 1;
+        sample.barometric_sample_time_us = 30_000;
+        let _ = state.step(&config(), sample, 0.01);
+        // No calls during 120 ms of missing measurements. A fresh sample
+        // represents a 1 m/s climb, not 12 m/s at the nominal 10 ms control dt.
+        sample.barometric_sample_sequence = 2;
+        sample.barometric_sample_time_us = 150_000;
+        sample.barometric_altitude_m = 10.12;
+        let mut delayed_loop = state;
+        let recovered = state.step(&config(), sample, 0.01);
+        let delayed = delayed_loop.step(&config(), sample, 0.12);
+        assert!((recovered.estimated_vertical_speed_mps - (0.12 / 0.27)).abs() < 1.0e-5);
+        assert_eq!(
+            recovered.estimated_vertical_speed_mps,
+            delayed.estimated_vertical_speed_mps
         );
     }
 

@@ -3,14 +3,14 @@ import { test } from 'node:test';
 import { FirmwareTelemetry, crc32 } from './firmware-telemetry.js';
 
 function frame(sequence = 42, time = 1234): Uint8Array {
-  const bytes = new Uint8Array(52);
-  bytes.set([70, 66, 87, 49]);
+  const bytes = new Uint8Array(56);
+  bytes.set([70, 66, 87, 50]);
   const view = new DataView(bytes.buffer);
   view.setUint32(4, sequence, true);
   view.setUint32(8, time, true);
   view.setUint32(12, 1, true);
-  [0, 1, 0, -0.1, 0.2, 0.3, 0.4, 0.5].forEach((value, index) => view.setFloat32(16 + index * 4, value, true));
-  view.setUint32(48, crc32(bytes.subarray(0, 48)), true);
+  [0, 1, 0, -0.1, 0.2, 0.3, 0.4, 0.5, 0.6].forEach((value, index) => view.setFloat32(16 + index * 4, value, true));
+  view.setUint32(52, crc32(bytes.subarray(0, 52)), true);
   return bytes;
 }
 

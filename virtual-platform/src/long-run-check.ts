@@ -18,7 +18,7 @@ const summaryPath = resolve(folder, 'summary.json');
 writeFileSync(modelPath, JSON.stringify(model), 'utf8');
 const result = await new Promise<number | null>((done, reject) => {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/run.ts',
-    '--model', modelPath, '--steps', '12000', '--output', resolve(folder, 'flight.csv'),
+    '--model', modelPath, '--steps', '12000', '--timing-acceleration', '1', '--output', resolve(folder, 'flight.csv'),
     '--summary', summaryPath], { cwd: resolve(root, 'virtual-platform'), stdio: 'inherit', windowsHide: true });
   child.once('error', reject);
   child.once('exit', done);

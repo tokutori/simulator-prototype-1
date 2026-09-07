@@ -1,6 +1,9 @@
 export interface PlantObservation {
   time_s: number;
   north_m: number;
+  east_m: number;
+  roll_rad: number;
+  yaw_rad: number;
   altitude_m: number;
   pitch_rad: number;
   flight_path_rad: number;

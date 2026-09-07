@@ -15,6 +15,9 @@ function observation(overrides: Partial<PlantObservation> = {}): PlantObservatio
   return {
     time_s: 0,
     north_m: 0,
+    east_m: 0,
+    roll_rad: 0,
+    yaw_rad: 0,
     altitude_m: 10.5,
     pitch_rad: 0,
     flight_path_rad: -3 * Math.PI / 180,

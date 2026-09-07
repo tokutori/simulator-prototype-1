@@ -167,7 +167,16 @@ impl SensorRuntime {
 #[entry]
 fn main() -> ! {
     let mut pac = hal::pac::Peripherals::take().unwrap();
+    let watchdog_reset = pac.WATCHDOG.reason().read().bits() & 0x03 != 0;
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+    if watchdog_reset {
+        // A reset in flight must not silently re-zero pressure and re-arm.
+        // Power-cycle/manual recovery is required; no servo pins are enabled.
+        watchdog.disable();
+        loop {
+            core::hint::spin_loop();
+        }
+    }
     let clocks = hal::clocks::init_clocks_and_plls(
         XTAL_FREQ_HZ,
         pac.XOSC,
@@ -255,6 +264,8 @@ fn main() -> ! {
     let mut safety = SurfaceSafetyState::default();
     // BNO055 specifies 650 ms from reset to configuration mode.
     timer.delay_ms(650);
+    // Covers unbounded HAL polling as well as a stalled control loop.
+    watchdog.start(fugit::MicrosDurationU32::micros(40_000));
     let mut sensor_runtime = SensorRuntime::initialize(&mut i2c, &mut timer);
     // Covers BNO055 operation-mode transition and first SDP810/DPS310 samples.
     timer.delay_ms(20);
@@ -379,11 +390,13 @@ fn main() -> ! {
                     safe.commands.elevator_rad,
                     elevator_command,
                     rudder_command,
+                    safe.commands.rudder_rad,
                 ],
             }
             .encode(),
         );
         record_sequence = record_sequence.wrapping_add(1);
+        watchdog.feed();
         let elapsed_us = timer.get_counter_low().wrapping_sub(update_start_us);
         if elapsed_us < CONTROL_PERIOD_US {
             let _ = deadline_missed.set_low();

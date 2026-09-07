@@ -9,6 +9,7 @@ export interface FirmwareRecord {
   automaticElevator: number;
   automaticRudder: number;
   safeElevator: number;
+  safeRudder: number;
   mixedElevator: number;
   mixedRudder: number;
 }
@@ -32,13 +33,13 @@ export class FirmwareTelemetry {
 
   receive(byte: number): void {
     this.bytes.push(byte & 255);
-    const magic = [70, 66, 87, 49];
+    const magic = [70, 66, 87, 50];
     while (this.bytes.length > 0 && !this.bytes.slice(0, 4).every((value, index) => value === magic[index])) this.bytes.shift();
-    if (this.bytes.length < 52) return;
+    if (this.bytes.length < 56) return;
     const data = Uint8Array.from(this.bytes);
     const view = new DataView(data.buffer);
-    const values = Array.from({ length: 8 }, (_, index) => view.getFloat32(16 + index * 4, true));
-    if (view.getUint32(48, true) !== crc32(data.subarray(0, 48)) || !values.every(Number.isFinite) || view.getUint32(12, true) > 1) {
+    const values = Array.from({ length: 9 }, (_, index) => view.getFloat32(16 + index * 4, true));
+    if (view.getUint32(52, true) !== crc32(data.subarray(0, 52)) || !values.every(Number.isFinite) || view.getUint32(12, true) > 1) {
       this.rejectedFrames++;
       this.bytes.shift();
       return;
@@ -49,6 +50,7 @@ export class FirmwareTelemetry {
       pilotElevator: values[0]!, pilotRudder: values[1]!, autonomy: values[2]!,
       automaticElevator: values[3]!, automaticRudder: values[4]!, safeElevator: values[5]!,
       mixedElevator: values[6]!, mixedRudder: values[7]!,
+      safeRudder: values[8]!,
     } };
     this.bytes = [];
   }

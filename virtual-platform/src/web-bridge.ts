@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ import { loadUf2 } from './uf2.js';
 import { FirmwareTelemetry } from './firmware-telemetry.js';
 import { attachServoPwm } from './servo-pwm.js';
 import { advanceUntil } from './execution-budget.js';
+import { installWatchdogMonitor } from './watchdog-monitor.js';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -24,6 +26,8 @@ const executable = process.platform === 'win32' ? 'plant-bridge.exe' : 'plant-br
 const bridgePath = resolve(root, 'target', 'debug', executable);
 const uf2Path = resolve(root, 'target', 'virtual-platform', 'fbw-rp2040.uf2');
 const modelPath = resolve(root, 'models', 'qx18-br-training-envelope.json');
+const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
+const runIdentity = { uf2_sha256: digest(uf2Path), model_sha256: digest(modelPath), plant_sha256: digest(bridgePath) };
 for (const path of [bridgePath, uf2Path, modelPath]) {
   if (!existsSync(path)) throw new Error(`required actual-UF2 input is missing: ${path}`);
 }
@@ -31,17 +35,21 @@ for (const path of [bridgePath, uf2Path, modelPath]) {
 const plant = spawn(bridgePath, ['--model', modelPath, '--dt', '0.01'], {
   cwd: root,
   windowsHide: true,
-  stdio: ['pipe', 'pipe', 'inherit'],
+  stdio: ['pipe', 'pipe', 'pipe'],
 });
+let plantError = '';
+plant.stderr.setEncoding('utf8');
+plant.stderr.on('data', (chunk: string) => { plantError = (plantError + chunk).slice(-4096); });
 const plantLines = createInterface({ input: plant.stdout })[Symbol.asyncIterator]();
 const readPlant = async (): Promise<PlantObservation> => {
   const next = await plantLines.next();
-  if (next.done) throw new Error('plant bridge stopped');
+  if (next.done) throw new Error(plantError.trim() || 'plant bridge stopped');
   return JSON.parse(next.value) as PlantObservation;
 };
 
 const simulator = new Simulator();
 const mcu = simulator.rp2040;
+installWatchdogMonitor(mcu);
 const recorder = new FirmwareTelemetry();
 const uart = mcu.uart[1];
 if (!uart) throw new Error('required UART1 recorder is missing');
@@ -91,13 +99,14 @@ let deadlineMissed = false;
 safetyPin.addListener(state => { if (state === GPIOPinState.High) safetyFailsafe = true; else if (state === GPIOPinState.Low) safetyFailsafe = false; });
 deadlinePin.addListener(state => { if (state === GPIOPinState.High) deadlineMissed = true; else if (state === GPIOPinState.Low) deadlineMissed = false; });
 
-const cycleNanos = 1e9 / 125_000_000 * 50;
+const cycleNanos = 1e9 / 125_000_000;
 let instructions = 0;
 advanceUntil(() => !safetyFailsafe && recorder.state.tag === 'received'
   && servos.elevator.sample(simulator.clock.micros).kind === 'valid'
   && servos.rudder.sample(simulator.clock.micros).kind === 'valid', executeOne, 100_000_000);
 
 const initialSimulationS = observation.time_s;
+const releaseMcuTimeUs = simulator.clock.micros;
 let initialWallMs: number | undefined;
 let nextFirmwareTickUs = simulator.clock.micros + 10_000;
 let processingAverageMs = 0;
@@ -133,11 +142,13 @@ async function step(line: string): Promise<void> {
   applyPilot(command);
   const elevatorCommandRad = elevator.commandRad;
   const rudderCommandRad = rudder.commandRad;
+  // Advance both subsystems with held inputs from the interval start. Never
+  // expose future plant observations to firmware executing this interval.
+  advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs, executeOne, 1_000_000);
+  nextFirmwareTickUs += 10_000;
   plant.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
   observation = await readPlant();
   updateDevices();
-  advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs, executeOne, 1_000_000);
-  nextFirmwareTickUs += 10_000;
 
   const pilotElevator = record.pilotElevator;
   const pilotRudder = record.pilotRudder;
@@ -166,11 +177,14 @@ async function step(line: string): Promise<void> {
     firmware_time_us: record.timeUs,
     automatic_valid: record.automaticValid,
     safe_elevator_command_rad: record.safeElevator,
+    safe_rudder_command_rad: record.safeRudder,
+    run_identity: runIdentity,
     observed_elevator_command_rad: elevatorCommandRad,
     observed_rudder_command_rad: rudderCommandRad,
     elevator_pwm_sample_time_us: elevator.atUs,
     rudder_pwm_sample_time_us: rudder.atUs,
     plant_interval_start_s: intervalStart,
+    release_mcu_time_us: releaseMcuTimeUs,
     backend: 'rp2040js-actual-uf2',
     emulation: {
       processing_ms: processingMs,
@@ -180,6 +194,7 @@ async function step(line: string): Promise<void> {
       deadline_missed: deadlineMissed,
       real_time: processingAverageMs <= 10 && lagMs <= 100 && (!ratioSettled || realTimeRatio >= 0.9),
       timing_validated: false,
+      timing_acceleration: 1,
     },
   })}\n`);
   if (observation.surface_contact) finish('ended', 'surface contact');

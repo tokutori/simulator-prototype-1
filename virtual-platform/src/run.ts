@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { dirname, resolve } from 'node:path';
@@ -16,6 +17,8 @@ import {
 } from './devices.js';
 import { loadUf2 } from './uf2.js';
 import { attachServoPwm } from './servo-pwm.js';
+import { installWatchdogMonitor } from './watchdog-monitor.js';
+import { FirmwareTelemetry } from './firmware-telemetry.js';
 
 const commandLine = process.argv.slice(2);
 if (commandLine.includes('--help') || commandLine.includes('-h')) {
@@ -31,7 +34,7 @@ Options:
   --steps COUNT              maximum plant steps
   --timing-acceleration N    MCU clock acceleration; timing is not validated
   --gust-{north,east,down}-mps V
-  --sensor-fault KIND        none, bno-status, bno-reset, as5600-magnet, sdp-crc, sdp-nack, dps-stale, dps-not-ready
+  --sensor-fault KIND        none, bno-status, bno-reset, as5600-magnet, sdp-crc, sdp-nack, dps-stale, dps-not-ready, i2c-stall
   --fault-start-s SECONDS    fault start in simulated plant time
   --fault-duration-s SECONDS fault duration
   --fault-update-count COUNT exact consecutive firmware control updates; overrides duration
@@ -46,6 +49,11 @@ const uf2Path = resolve(repositoryRoot, args.uf2);
 for (const path of [bridgePath, modelPath, uf2Path]) {
   if (!existsSync(path)) throw new Error(`required input does not exist: ${path}`);
 }
+const inputIdentity = {
+  uf2_sha256: createHash('sha256').update(readFileSync(uf2Path)).digest('hex'),
+  model_sha256: createHash('sha256').update(readFileSync(modelPath)).digest('hex'),
+  plant_sha256: createHash('sha256').update(readFileSync(bridgePath)).digest('hex'),
+};
 const bridgeArguments = [
   '--model', modelPath,
   '--dt', String(args.dtS),
@@ -66,6 +74,11 @@ async function main(): Promise<void> {
   let observation = await readObservation();
   const simulator = new Simulator();
   const mcu = simulator.rp2040;
+  installWatchdogMonitor(mcu);
+  const recorder = new FirmwareTelemetry();
+  const uart = mcu.uart[1];
+  if (!uart) throw new Error('required UART1 recorder is missing');
+  uart.onByte = byte => recorder.receive(byte);
   mcu.logger = new ConsoleLogger(LogLevel.Error, false);
   loadUf2(uf2Path, mcu);
   const vectorTable = 0x10000100;
@@ -106,6 +119,9 @@ async function main(): Promise<void> {
   const i2cTrace: string[] = [];
   i2c.onStart = () => i2c.completeStart();
   i2c.onConnect = (address, mode) => {
+    // Model a transaction that never completes, not an immediate NACK. The
+    // actual firmware must rely on its hardware watchdog to bound this stall.
+    if (activeSensorFault() === 'i2c-stall' || (updateFaultActive && args.sensorFault === 'i2c-stall')) return;
     const sdpNack = args.sensorFault === 'sdp-nack'
       && address === sdp.address
       && (activeSensorFault() === 'sdp-nack' || updateFaultActive);
@@ -230,6 +246,7 @@ async function main(): Promise<void> {
     );
   }
   const preflightBnoConfigurationWrites = bno.configurationWriteCount;
+  const releaseMcuTimeUs = simulator.clock.micros;
   // Preflight runs against a frozen plant; release-time metrics start at zero.
   controlUpdateCount = 0;
   deadlineMissActivationCount = 0;
@@ -237,7 +254,7 @@ async function main(): Promise<void> {
   const outputPath = resolve(repositoryRoot, args.output);
   mkdirSync(dirname(outputPath), { recursive: true });
   const output = createWriteStream(outputPath, { encoding: 'utf8' });
-  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed\n');
+  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed,firmware_sequence,firmware_time_us,automatic_valid,automatic_elevator_command_deg,automatic_rudder_command_deg,safe_elevator_command_deg,mixed_elevator_command_deg,mixed_rudder_command_deg,elevator_pwm_sample_time_us,rudder_pwm_sample_time_us,plant_interval_start_s,safe_rudder_command_deg,observed_elevator_command_deg,observed_rudder_command_deg,uf2_sha256,model_sha256,plant_sha256,release_mcu_time_us,elevator_deg,rudder_deg,pilot_elevator,pilot_rudder,autonomy,manual_elevator_command_deg,manual_rudder_command_deg,east_m,roll_deg,yaw_deg\n');
   let nextFirmwareTickUs = simulator.clock.micros + args.dtS * 1e6;
   let runningMinimumAltitude = observation.altitude_m;
   let maximumReascent = 0;
@@ -248,8 +265,22 @@ async function main(): Promise<void> {
   let deadlineMissDurationS = 0;
 
   for (let step = 0; step < args.steps && !observation.surface_contact; step += 1) {
-    const elevatorCommandRad = servos.elevator.sample(simulator.clock.micros).commandRad;
-    const rudderCommandRad = servos.rudder.sample(simulator.clock.micros).commandRad;
+    const record = recorder.requireFresh(simulator.clock.micros);
+    const elevator = servos.elevator.sample(simulator.clock.micros);
+    const rudder = servos.rudder.sample(simulator.clock.micros);
+    if (elevator.kind !== 'valid' || rudder.kind !== 'valid') throw new Error('servo PWM missing or invalid');
+    const elevatorCommandRad = elevator.commandRad;
+    const rudderCommandRad = rudder.commandRad;
+    const intervalStart = observation.time_s;
+    // Causal held-input coupling: firmware sees only interval-start sensors.
+    const stepInstructionStart = instructions;
+    while (simulator.clock.micros < nextFirmwareTickUs && instructions - stepInstructionStart < instructionLimit) {
+      const cycles = mcu.core.executeInstruction();
+      simulator.clock.tick(cycles * cycleNanos);
+      instructions += 1;
+    }
+    if (instructions - stepInstructionStart >= instructionLimit) throw new Error('virtual MCU per-step instruction watchdog reached');
+    nextFirmwareTickUs += args.dtS * 1e6;
     bridge.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
     observation = await readObservation();
     updateDevices();
@@ -268,6 +299,15 @@ async function main(): Promise<void> {
       rudderCommandDeg.toFixed(6), rudderActualDeg.toFixed(6),
       Number(observation.aero_in_range), Number(observation.surface_contact), Number(faultInjected),
       Number(sensorSampleInvalid), Number(safetyFailsafe), Number(deadlineMissed),
+      record.sequence, record.timeUs, Number(record.automaticValid),
+      record.automaticElevator * 180 / Math.PI, record.automaticRudder * 180 / Math.PI,
+      record.safeElevator * 180 / Math.PI, record.mixedElevator * 180 / Math.PI, record.mixedRudder * 180 / Math.PI,
+      elevator.atUs, rudder.atUs, intervalStart,
+      record.safeRudder * 180 / Math.PI, commandDeg, rudderCommandDeg,
+      inputIdentity.uf2_sha256, inputIdentity.model_sha256, inputIdentity.plant_sha256, releaseMcuTimeUs,
+      actualDeg, rudderActualDeg, record.pilotElevator, record.pilotRudder, record.autonomy,
+      record.pilotElevator * 10, -record.pilotRudder * 10,
+      observation.east_m, observation.roll_rad * 180 / Math.PI, observation.yaw_rad * 180 / Math.PI,
     ].join(',') + '\n');
     runningMinimumAltitude = Math.min(runningMinimumAltitude, observation.altitude_m);
     maximumReascent = Math.max(maximumReascent, observation.altitude_m - runningMinimumAltitude);
@@ -277,20 +317,16 @@ async function main(): Promise<void> {
     if (sensorSampleInvalid) invalidSampleDurationS += args.dtS;
     if (deadlineMissed) deadlineMissDurationS += args.dtS;
 
-    const stepInstructionStart = instructions;
-    while (simulator.clock.micros < nextFirmwareTickUs && instructions - stepInstructionStart < instructionLimit) {
-      const cycles = mcu.core.executeInstruction();
-      simulator.clock.tick(cycles * cycleNanos);
-      instructions += 1;
-    }
-    if (instructions - stepInstructionStart >= instructionLimit) throw new Error('virtual MCU per-step instruction watchdog reached');
-    nextFirmwareTickUs += args.dtS * 1e6;
   }
   output.end();
   await once(output, 'finish');
   bridge.stdin.end();
   await once(bridge, 'exit');
   const summary = {
+    evidence_version: 1,
+    release_mcu_time_us: releaseMcuTimeUs,
+    generated_at: new Date().toISOString(),
+    inputs: inputIdentity,
     simulated_s: observation.time_s,
     final_altitude_m: observation.altitude_m,
     maximum_flight_path_deg: maximumFlightPathDeg,
@@ -345,7 +381,7 @@ function parseArgs(values: string[]) {
     summary: '',
     dtS: 0.01,
     steps: 2000,
-    timingAcceleration: 50,
+    timingAcceleration: 1,
     gustNorthMps: 0,
     gustEastMps: 0,
     gustDownMps: 0,
@@ -384,7 +420,7 @@ function parseArgs(values: string[]) {
     throw new Error('gust components must be finite');
   }
   const sensorFaults: SensorFaultKind[] = [
-    'none', 'bno-status', 'bno-reset', 'as5600-magnet', 'sdp-crc', 'sdp-nack', 'dps-stale', 'dps-not-ready',
+    'none', 'bno-status', 'bno-reset', 'as5600-magnet', 'sdp-crc', 'sdp-nack', 'dps-stale', 'dps-not-ready', 'i2c-stall',
   ];
   if (!sensorFaults.includes(result.sensorFault)) throw new Error(`unknown --sensor-fault: ${result.sensorFault}`);
   if (!Number.isFinite(result.faultStartS) || result.faultStartS < 0) {

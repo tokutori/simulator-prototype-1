@@ -1,6 +1,26 @@
 import { test, expect } from '@playwright/test';
 
-test('real UF2 live restart, replay isolation and durable analysis tab', async ({ page, context }) => {
+test('late startup sample cannot replace a user-selected replay', async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/sample-flight.csv', async route => {
+    await gate;
+    await route.fulfill({ contentType: 'text/csv', body: 'time_s,north_m,altitude_m,pitch_deg,airspeed_mps\n0,0,10,0,2\n1,10,9,0,2\n' });
+  });
+  await page.goto('/');
+  await page.locator('#csv-file').setInputFiles({ name: 'user-flight.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('time_s,north_m,altitude_m,pitch_deg,airspeed_mps\n0,0,10,0,11\n1,123,9,0,11\n') });
+  await expect(page.locator('#connection-status')).toHaveText('user-flight.csv');
+  await expect(page.locator('#airspeed-value')).toHaveText('11.0');
+  const response = page.waitForResponse('**/sample-flight.csv');
+  release();
+  await (await response).finished();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.locator('#connection-status')).toHaveText('user-flight.csv');
+  await expect(page.locator('#airspeed-value')).toHaveText('11.0');
+});
+
+test('real UF2 live restart, replay isolation and durable analysis tab', async ({ page, context }, testInfo) => {
   const errors: string[] = [];
   const frames: Record<string, unknown>[] = [];
   page.on('websocket', socket => socket.on('framereceived', event => {
@@ -11,10 +31,12 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   await page.goto('/');
   await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
   await expect(page.locator('#open-analysis')).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath('fhd-chase.png') });
   await page.locator('#autonomy').fill('0');
   // Restart keeps a normal button focused; keyboard flight input must still work.
   await page.locator('#restart-live').click();
   await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
+  await page.screenshot({ path: testInfo.outputPath('fhd-after-restart.png') });
   await page.keyboard.down('s');
   await expect.poll(() => frames.some(frame => frame.pilot_elevator === 1 && frame.autonomy === 0), { timeout: 15_000 }).toBe(true);
   await page.keyboard.up('s');
@@ -45,7 +67,7 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   expect(errors).toEqual([]);
 });
 
-test('12001 full evidence samples survive IndexedDB and render at 4K', async ({ page }) => {
+test('12001 full evidence samples survive IndexedDB and render at 4K', async ({ page }, testInfo) => {
   await page.goto('/analysis.html');
   const id = await page.evaluate(async () => {
     // Explicit storage-capacity fixture; no flight-performance claim.
@@ -77,6 +99,7 @@ test('12001 full evidence samples survive IndexedDB and render at 4K', async ({ 
   await expect(page.locator('#analysis-content')).toBeVisible();
   await expect(page.locator('#summary-time')).toHaveText('120.00 s');
   await expect(page.locator('#summary-range')).toHaveText('1200.0 m');
+  await page.screenshot({ path: testInfo.outputPath('4k-analysis.png'), fullPage: true });
   await page.reload();
   await expect(page.locator('#summary-time')).toHaveText('120.00 s');
 });

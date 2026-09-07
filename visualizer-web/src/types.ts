@@ -32,6 +32,20 @@ export type ControlTelemetry = { tag: "unavailable" } | {
   rudderPwmSampleTimeUs: number;
 };
 
+export function isControlTelemetry(value: unknown): value is ControlTelemetry {
+  if (!value || typeof value !== "object") return false;
+  const evidence = value as ControlTelemetry;
+  if (evidence.tag === "unavailable") return true;
+  if (evidence.tag !== "firmware" || typeof evidence.automaticValid !== "boolean" || !isRunIdentity(evidence.runIdentity)) return false;
+  const values = [evidence.sequence, evidence.timeUs, evidence.releaseMcuTimeUs, evidence.plantIntervalStartS,
+    evidence.safeElevatorCommandRad, evidence.safeRudderCommandRad, evidence.observedElevatorCommandRad,
+    evidence.observedRudderCommandRad, evidence.elevatorPwmSampleTimeUs, evidence.rudderPwmSampleTimeUs];
+  return values.every(v => typeof v === "number" && Number.isFinite(v))
+    && Number.isSafeInteger(evidence.sequence) && evidence.sequence >= 0
+    && [evidence.timeUs, evidence.releaseMcuTimeUs, evidence.plantIntervalStartS,
+      evidence.elevatorPwmSampleTimeUs, evidence.rudderPwmSampleTimeUs].every(v => v >= 0);
+}
+
 export interface FlightFrame {
   experiment: ExperimentEvidence;
   controlTelemetry: ControlTelemetry;

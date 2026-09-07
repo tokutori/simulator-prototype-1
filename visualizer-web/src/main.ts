@@ -44,6 +44,7 @@ import {
   type InputSettings,
 } from "./input.ts";
 import { LivePlayback } from "./live-playback.ts";
+import { ReplaySelection } from "./replay-selection.ts";
 import { frameFromLive, interpolateFrame, parseFlightCsv, parseCsvOutcome, parseCsvIncidents, experimentColumns, experimentCsvValues } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
@@ -91,6 +92,7 @@ let cameraMode: CameraMode = "chase";
 let cameraModeBeforeXr: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
+const replaySelection = new ReplaySelection();
 let replayOutcome: SessionOutcome = { tag: "unknown", reason: "No session completion evidence" };
 let liveOutcome: SessionOutcome = { tag: "active" };
 let liveIncidents: SessionIncident[] = [];
@@ -372,11 +374,13 @@ function bindControls(): void {
   element<HTMLInputElement>("csv-file").addEventListener("change", async (event) => {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (!file) return;
+    const selection = replaySelection.select();
     try {
       const text = await file.text();
+      if (!replaySelection.accepts(selection)) return;
       loadReplay(parseFlightCsv(text), file.name, true, parseCsvOutcome(text), parseCsvIncidents(text));
     } catch (error) {
-      showMessage(String(error));
+      if (replaySelection.accepts(selection)) showMessage(String(error));
     }
   });
   element<HTMLInputElement>("autonomy").addEventListener("input", updateAutonomyLabel);
@@ -453,13 +457,15 @@ function bindKeyCapture(
 }
 
 async function loadDefaultReplay(selectMode: boolean): Promise<void> {
+  const selection = replaySelection.current();
   try {
     const response = await fetch("/sample-flight.csv");
     if (!response.ok) throw new Error(`sample flight HTTP ${response.status}`);
     const text = await response.text();
+    if (!replaySelection.accepts(selection)) return;
     loadReplay(parseFlightCsv(text), "sample-flight.csv", selectMode, parseCsvOutcome(text), parseCsvIncidents(text));
   } catch (error) {
-    showMessage(`Default replay could not be loaded: ${String(error)}`);
+    if (replaySelection.accepts(selection)) showMessage(`Default replay could not be loaded: ${String(error)}`);
   }
 }
 

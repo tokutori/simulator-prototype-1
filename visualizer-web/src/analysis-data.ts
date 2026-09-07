@@ -1,5 +1,5 @@
 import type { FlightFrame, SessionOutcome, SessionIncident } from "./types.ts";
-import { isRunIdentity, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
+import { isControlTelemetry, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
 
 export interface FlightAnalysisDataset {
   version: 3;
@@ -47,7 +47,8 @@ export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
     candidate.version = 3;
     candidate.outcome = { tag: "unknown", reason: "Legacy recording has no session completion evidence" };
     candidate.incidents = [];
-    candidate.frames = candidate.frames.map(frame => ({ ...frame, experiment: { tag: "unknown" } }));
+    candidate.frames = candidate.frames.map(frame => ({ ...frame, experiment: { tag: "unknown" },
+      controlTelemetry: isControlTelemetry(frame?.controlTelemetry) ? frame.controlTelemetry : { tag: "unavailable" } }));
   }
   if (!isSessionOutcome(candidate.outcome)) throw new Error("Invalid session completion evidence");
   if (!Array.isArray(candidate.incidents) || !candidate.incidents.every(isSessionIncident)) throw new Error("Invalid session incidents");
@@ -74,13 +75,7 @@ function validFrame(value: FlightFrame): boolean {
     "automaticElevatorCommandRad", "automaticRudderCommandRad", "mixedElevatorCommandRad", "mixedRudderCommandRad"];
   if (numericKeys.some(key => typeof value[key] !== "number" || !Number.isFinite(value[key]))
     || typeof value.surfaceContact !== "boolean") return false;
-  const evidence = value.controlTelemetry;
-  if (!evidence || typeof evidence !== "object") return false;
-  if (evidence.tag === "unavailable") return true;
-  return evidence.tag === "firmware" && typeof evidence.automaticValid === "boolean"
-    && isRunIdentity(evidence.runIdentity)
-    && Object.entries(evidence).every(([key, entry]) => key === "tag" || key === "automaticValid" || key === "runIdentity"
-      || (typeof entry === "number" && Number.isFinite(entry)));
+  return isControlTelemetry(value.controlTelemetry);
 }
 
 export function downsampleFrames(frames: readonly FlightFrame[], maximumFrames: number): FlightFrame[] {

@@ -1,5 +1,5 @@
 import type { FlightFrame, InteractiveObservation, ExperimentEvidence, SessionOutcome, SessionIncident } from "./types.ts";
-import { isRunIdentity, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
+import { isRunIdentity, isControlTelemetry, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
 
 const degree = Math.PI / 180;
 
@@ -75,7 +75,7 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
     realTime: observation.emulation.real_time, timingValidated: observation.emulation.timing_validated,
   };
   if (!isExperimentEvidence(experiment)) throw new Error("Invalid experiment timing or model validity evidence");
-  return {
+  const result: FlightFrame = {
     experiment,
     controlTelemetry: { tag: "firmware", sequence: observation.firmware_sequence,
       runIdentity: observation.run_identity,
@@ -111,6 +111,8 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
     mixedRudderCommandRad: observation.mixed_rudder_command_rad,
     surfaceContact: observation.surface_contact,
   };
+  if (!isControlTelemetry(result.controlTelemetry)) throw new Error("Invalid firmware evidence");
+  return result;
 }
 
 export function interpolateFrame(frames: readonly FlightFrame[], timeS: number): FlightFrame {
@@ -166,8 +168,15 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
   };
   const identity = { uf2_sha256: row.get("uf2_sha256"), model_sha256: row.get("model_sha256"), plant_sha256: row.get("plant_sha256"),
     virtual_platform_sha256: row.get("virtual_platform_sha256") || undefined, scenario_sha256: row.get("scenario_sha256") || undefined };
-  if (row.get("firmware_sequence") && !isRunIdentity(identity)) throw new Error(`Missing or invalid run identity at CSV row ${lineNumber}`);
+  const firmwareColumns = ["firmware_sequence", "firmware_time_us", "release_mcu_time_us", "plant_interval_start_s", "automatic_valid",
+    "safe_elevator_command_deg", "safe_rudder_command_deg", "observed_elevator_command_deg", "observed_rudder_command_deg",
+    "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us", "uf2_sha256", "model_sha256", "plant_sha256"];
+  const hasFirmware = firmwareColumns.every(column => row.get(column) !== undefined && row.get(column) !== "");
+  if (hasFirmware && !isRunIdentity(identity)) throw new Error(`Missing or invalid run identity at CSV row ${lineNumber}`);
   const tag = row.get("experiment_tag");
+  if (tag === "measured" && (!hasFirmware || !identity.virtual_platform_sha256 || !identity.scenario_sha256)) {
+    throw new Error(`Incomplete measured firmware evidence at CSV row ${lineNumber}`);
+  }
   if (tag && tag !== "unknown" && tag !== "measured") throw new Error(`Invalid experiment tag at CSV row ${lineNumber}`);
   if (tag === "measured" && experimentColumns.some(column => !row.get(column))) {
     throw new Error(`Missing experiment evidence at CSV row ${lineNumber}`);
@@ -179,10 +188,10 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
     realTime: boolean("real_time"), timingValidated: boolean("timing_validated"),
   };
   if (!isExperimentEvidence(experiment)) throw new Error(`Invalid experiment evidence at CSV row ${lineNumber}`);
-  return {
+  const result: FlightFrame = {
     experiment,
     timeS: number("time_s"),
-    controlTelemetry: row.get("firmware_sequence") ? {
+    controlTelemetry: hasFirmware ? {
       tag: "firmware", sequence: number("firmware_sequence"), timeUs: number("firmware_time_us"),
       releaseMcuTimeUs: number("release_mcu_time_us"), plantIntervalStartS: number("plant_interval_start_s"),
       runIdentity: { uf2_sha256: identity.uf2_sha256 ?? "", model_sha256: identity.model_sha256 ?? "", plant_sha256: identity.plant_sha256 ?? "",
@@ -220,6 +229,8 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
       number("mixed_rudder_command_deg", number("rudder_command_deg")) * degree,
     surfaceContact: boolean("surface_contact"),
   };
+  if (!isControlTelemetry(result.controlTelemetry)) throw new Error(`Invalid firmware evidence at CSV row ${lineNumber}`);
+  return result;
 }
 
 export function interpolatePair(before: FlightFrame, after: FlightFrame, fraction: number): FlightFrame {

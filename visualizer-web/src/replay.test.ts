@@ -4,6 +4,10 @@ import test from "node:test";
 import { frameFromLive, interpolateFrame, parseFlightCsv, parseCsvOutcome, parseCsvIncidents, experimentColumns, experimentCsvValues } from "./replay.ts";
 import type { InteractiveObservation, ExperimentEvidence } from "./types.ts";
 
+const firmwareHeader = "firmware_sequence,firmware_time_us,release_mcu_time_us,plant_interval_start_s,automatic_valid,safe_elevator_command_deg,safe_rudder_command_deg,observed_elevator_command_deg,observed_rudder_command_deg,elevator_pwm_sample_time_us,rudder_pwm_sample_time_us,uf2_sha256,model_sha256,plant_sha256,virtual_platform_sha256,scenario_sha256";
+const firmwareRow = (sequence: number): string => [sequence, 123000, 120000, 0, sequence !== 3, 0, 0, 0, 0, 122000, 122000,
+  ...Array.from({ length: 5 }, () => "a".repeat(64))].join(",");
+
 test("CSV parser accepts simulator output and interpolation is continuous", () => {
   const frames = parseFlightCsv(
     "time_s,north_m,east_m,altitude_m,roll_deg,pitch_deg,yaw_deg,flight_path_deg,airspeed_mps,alpha_deg,elevator_deg,rudder_deg,surface_contact\n" +
@@ -20,10 +24,9 @@ test("CSV parser accepts simulator output and interpolation is continuous", () =
 });
 
 test("firmware evidence stays discrete during presentation interpolation", () => {
-  const hashes = Array.from({ length: 3 }, () => "a".repeat(64)).join(",");
   const frames = parseFlightCsv(
-    "time_s,north_m,altitude_m,pitch_deg,firmware_sequence,firmware_time_us,automatic_valid,elevator_pwm_sample_time_us,uf2_sha256,model_sha256,plant_sha256\n" +
-    `0,0,10,-3,3,123000,false,122000,${hashes}\n1,8,9,-2,5,143000,true,142000,${hashes}\n`,
+    `time_s,north_m,altitude_m,pitch_deg,${firmwareHeader}\n` +
+    `0,0,10,-3,${firmwareRow(3)}\n1,8,9,-2,${firmwareRow(5)}\n`,
   );
   assert.equal(interpolateFrame(frames, 0.5).controlTelemetry.tag, "firmware");
   assert.deepEqual(interpolateFrame(frames, 0.5).controlTelemetry, frames[0]?.controlTelemetry);
@@ -75,13 +78,19 @@ test("CSV preserves envelope, wall timing, deadline and explicit session/inciden
   const outcome = { tag: "failed", reason: "model envelope violation, alpha outside allowed range" };
   const incidents = [{ kind: "telemetry-stall", wallTimeIso: "2026-09-08T00:00:00Z", sinceLastReceiptMs: 650 }];
   const csv = `# birdman-session ${JSON.stringify(outcome)}\n# birdman-incidents ${JSON.stringify(incidents)}\n`
-    + `time_s,north_m,altitude_m,pitch_deg,${experimentColumns.join(",")}\n`
-    + `0,0,10,0,${experimentCsvValues(evidence).join(",")}\n1,10,9,0,${experimentCsvValues(evidence).join(",")}\n`;
+    + `time_s,north_m,altitude_m,pitch_deg,${firmwareHeader},${experimentColumns.join(",")}\n`
+    + `0,0,10,0,${firmwareRow(1)},${experimentCsvValues(evidence).join(",")}\n1,10,9,0,${firmwareRow(2)},${experimentCsvValues(evidence).join(",")}\n`;
   assert.deepEqual(parseFlightCsv(csv)[0]!.experiment, evidence);
   assert.deepEqual(parseCsvOutcome(csv), outcome);
   assert.deepEqual(parseCsvIncidents(csv), incidents);
   assert.equal(parseCsvOutcome("time_s,north_m").tag, "unknown");
   assert.throws(() => parseFlightCsv(csv.replace("measured,false,500", "measured,false,")), /Missing experiment evidence/);
+  assert.throws(() => parseFlightCsv(csv.replace("1,123000", "1,")), /Incomplete measured firmware evidence/);
+});
+
+test("incomplete legacy firmware evidence is unavailable rather than zero-filled", () => {
+  const frames = parseFlightCsv("time_s,north_m,altitude_m,pitch_deg,firmware_sequence\n0,0,10,0,1\n1,10,9,0,2");
+  assert.equal(frames[0]!.controlTelemetry.tag, "unavailable");
 });
 
 test("CSV parser rejects non-monotonic time", () => {

@@ -80,3 +80,13 @@ test("legacy analysis is explicitly unknown; malformed timing and nonmonotonic s
   const dataset = prepareAnalysisDataset("test", frames);
   assert.throws(() => parseAnalysisDataset(JSON.stringify({ ...dataset, frames: [frames[1], frames[0]] })), /increase strictly/);
 });
+
+test("saved firmware must contain every mandatory field; legacy partial evidence is unavailable", () => {
+  const frames = [frame(0, 0, 0), frame(1, 1, 0)];
+  const incomplete = { tag: "firmware", automaticValid: true, runIdentity: {
+    uf2_sha256: "a".repeat(64), model_sha256: "b".repeat(64), plant_sha256: "c".repeat(64) } };
+  const malformed = { ...prepareAnalysisDataset("bad", frames), frames: frames.map(value => ({ ...value, controlTelemetry: incomplete })) };
+  assert.throws(() => parseAnalysisDataset(JSON.stringify(malformed)), /invalid telemetry/);
+  const legacy = parseAnalysisDataset(JSON.stringify({ ...malformed, version: 2 }));
+  assert.equal(legacy.frames[0]!.controlTelemetry.tag, "unavailable");
+});

@@ -7,7 +7,15 @@ use flight_dynamics_core::{
 use serde::Deserialize;
 
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
-const SUPPORTED_SCHEMA_VERSION: &str = "0.11.0";
+const SUPPORTED_SCHEMA_VERSION: &str = "0.12.0";
+
+/// Application resolution policy: at least 100 Hz, matching the fastest sample profile.
+/// This is not a universal numerical stability proof for arbitrary aircraft datasets.
+pub const MAX_SIMULATION_STEP_S: f64 = 0.01;
+
+pub fn supported_simulation_step(dt_s: f64) -> bool {
+    dt_s.is_finite() && dt_s > 0.0 && dt_s <= MAX_SIMULATION_STEP_S
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,7 +76,14 @@ pub struct ReferenceGeometryFile {
     pub area_m2: f64,
     pub span_m: f64,
     pub chord_m: f64,
-    pub moment_reference: String,
+    pub moment_reference: MomentReferenceFile,
+}
+
+/// Only CG moments are currently supported; other points require explicit r cross F conversion.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "point", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum MomentReferenceFile {
+    CentreOfMass {},
 }
 
 #[derive(Debug, Deserialize)]
@@ -306,7 +321,6 @@ impl LoadedSimulation {
             &file.metadata.provenance,
             &file.metadata.validation_status,
             &file.metadata.valid_for,
-            &file.reference_geometry.moment_reference,
         ]
         .iter()
         .any(|value| value.trim().is_empty())
@@ -688,6 +702,31 @@ mod tests {
     use std::path::Path;
 
     use super::{LoadedSimulation, one_minus_cosine_shape};
+
+    #[test]
+    fn moment_reference_rejects_unsupported_points_and_free_text() {
+        assert!(
+            serde_json::from_str::<super::MomentReferenceFile>(r#"{"point":"centre-of-mass"}"#)
+                .is_ok()
+        );
+        for unsupported in [
+            r#""centre of gravity""#,
+            r#"{"point":"aerodynamic-centre"}"#,
+            r#"{"point":"centre-of-mass","offset_m":[1,0,0]}"#,
+        ] {
+            assert!(serde_json::from_str::<super::MomentReferenceFile>(unsupported).is_err());
+        }
+    }
+
+    #[test]
+    fn application_resolution_rejects_large_or_nonfinite_steps() {
+        for valid in [0.01, 0.005, 0.001] {
+            assert!(super::supported_simulation_step(valid));
+        }
+        for invalid in [0.0, -0.01, 0.02, 10.0, 1.0e100, f64::NAN, f64::INFINITY] {
+            assert!(!super::supported_simulation_step(invalid));
+        }
+    }
 
     #[test]
     fn release_velocity_frame_is_explicit_under_wind_and_attitude() {

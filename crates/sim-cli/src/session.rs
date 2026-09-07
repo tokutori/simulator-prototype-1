@@ -154,7 +154,8 @@ impl PlantSession {
         let environment = self
             .loaded
             .environment_at_north(self.state.position_ned_m.x);
-        let loads = aerodynamic_loads(model, self.state, self.controls, environment);
+        let loads = aerodynamic_loads(model, self.state, self.controls, environment)
+            .map_err(PlantSessionError::Step)?;
         let aero_in_range = model.longitudinal.contains(loads.condition.alpha_rad);
         self.termination = self.termination.or_else(|| {
             terminal_condition(
@@ -206,6 +207,7 @@ impl PlantSession {
             self.loaded
                 .environment_at_north(self.state.position_ned_m.x),
         );
+        let initial_loads = initial_loads.map_err(PlantSessionError::Step)?;
         if let Some(reason) = terminal_condition(
             self.state.position_ned_m.z >= 0.0,
             initial_model
@@ -282,7 +284,7 @@ fn flight_path_angle_rad(state: RigidBodyState) -> f64 {
 }
 
 fn validate_dt(dt_s: f64) -> Result<(), PlantSessionError> {
-    if dt_s.is_finite() && dt_s > 0.0 {
+    if crate::config::supported_simulation_step(dt_s) {
         Ok(())
     } else {
         Err(PlantSessionError::InvalidTimeStep)
@@ -313,7 +315,10 @@ impl core::fmt::Display for PlantSessionError {
             Self::Actuator(error) => write!(formatter, "actuator error: {error:?}"),
             Self::Sensor(error) => write!(formatter, "sensor error: {error:?}"),
             Self::Step(error) => write!(formatter, "flight-dynamics step error: {error:?}"),
-            Self::InvalidTimeStep => write!(formatter, "time step must be finite and positive"),
+            Self::InvalidTimeStep => write!(
+                formatter,
+                "time step must be finite and in (0, 0.01] seconds"
+            ),
             Self::Terminated(reason) => write!(formatter, "plant terminated: {reason:?}"),
         }
     }
@@ -380,6 +385,11 @@ mod tests {
         let model = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../models/qx18-br-training-envelope.json");
         let mut session = PlantSession::load(&model).expect("model must load");
+        assert!(matches!(
+            session.step(0.0, 0.0, 10.0),
+            Err(PlantSessionError::InvalidTimeStep)
+        ));
+        assert_eq!(session.time_s, 0.0);
         let initial = session.observe(0.01).expect("initial observation");
         let next = session.step(0.0, 0.0, 0.01).expect("plant step");
 

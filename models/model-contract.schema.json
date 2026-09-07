@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:tokutori:birdman:model-contract:0.11.0",
+  "$id": "urn:tokutori:birdman:model-contract:0.12.0",
   "title": "Birdman flight dynamics prototype model contract",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
   ],
   "properties": {
     "$schema": { "type": "string" },
-    "schema_version": { "const": "0.11.0" },
+    "schema_version": { "const": "0.12.0" },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -78,7 +78,11 @@
         "area_m2": { "type": "number", "exclusiveMinimum": 0 },
         "span_m": { "type": "number", "exclusiveMinimum": 0 },
         "chord_m": { "type": "number", "exclusiveMinimum": 0 },
-        "moment_reference": { "type": "string", "minLength": 1 }
+        "moment_reference": {
+          "type": "object", "additionalProperties": false,
+          "required": ["point"],
+          "properties": { "point": { "const": "centre-of-mass" } }
+        }
       }
     },
     "aerodynamics": {

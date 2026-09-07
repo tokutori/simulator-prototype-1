@@ -18,6 +18,8 @@ pub struct AeroPoint {
 /// Errors detected before an aircraft model can be simulated.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModelError {
+    /// A table query angle is non-finite.
+    InvalidAeroQuery,
     /// Mass is zero, negative, or non-finite.
     InvalidMass,
     /// A reference geometry value is zero, negative, or non-finite.
@@ -75,15 +77,20 @@ impl<'a> AeroTable<'a> {
     }
 
     /// Interpolates coefficients linearly and clamps outside the table range.
-    #[must_use]
-    pub fn sample(self, alpha_rad: f64) -> AeroPoint {
+    ///
+    /// # Errors
+    /// Returns [`ModelError::InvalidAeroQuery`] for a non-finite query angle.
+    pub fn sample(self, alpha_rad: f64) -> Result<AeroPoint, ModelError> {
+        if !alpha_rad.is_finite() {
+            return Err(ModelError::InvalidAeroQuery);
+        }
         let first = self.points[0];
         let last = self.points[self.points.len() - 1];
         if alpha_rad <= first.alpha_rad {
-            return first;
+            return Ok(first);
         }
         if alpha_rad >= last.alpha_rad {
-            return last;
+            return Ok(last);
         }
         let upper = self
             .points
@@ -92,12 +99,12 @@ impl<'a> AeroTable<'a> {
         let upper_point = self.points[upper];
         let fraction =
             (alpha_rad - lower_point.alpha_rad) / (upper_point.alpha_rad - lower_point.alpha_rad);
-        AeroPoint {
+        Ok(AeroPoint {
             alpha_rad,
             cl: lerp(lower_point.cl, upper_point.cl, fraction),
             cd: lerp(lower_point.cd, upper_point.cd, fraction),
             cm: lerp(lower_point.cm, upper_point.cm, fraction),
-        }
+        })
     }
 
     /// Reports whether an angle is inside the supplied coefficient range.
@@ -378,9 +385,12 @@ mod tests {
             },
         ];
         let table = AeroTable::new(&points).expect("valid table");
-        assert_eq!(table.sample(-1.0), points[0]);
-        assert_eq!(table.sample(2.0), points[1]);
-        assert_eq!(table.sample(0.25).cl, 0.5);
+        assert_eq!(table.sample(-1.0), Ok(points[0]));
+        assert_eq!(table.sample(2.0), Ok(points[1]));
+        assert_eq!(table.sample(0.25).unwrap().cl, 0.5);
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(table.sample(invalid), Err(ModelError::InvalidAeroQuery));
+        }
     }
 
     #[test]

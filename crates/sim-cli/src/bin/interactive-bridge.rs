@@ -127,8 +127,8 @@ fn parse_args() -> Result<BridgeArgs, Box<dyn std::error::Error>> {
             _ => return Err(format!("unknown argument: {arg}").into()),
         }
     }
-    if !dt_s.is_finite() || dt_s <= 0.0 {
-        return Err("--dt must be finite and positive".into());
+    if !sim_cli::config::supported_simulation_step(dt_s) {
+        return Err("--dt must be finite and in (0, 0.01] seconds".into());
     }
     if !initial_autonomy.is_finite() || !(0.0..=1.0).contains(&initial_autonomy) {
         return Err("--autonomy must be within 0..1".into());

@@ -87,6 +87,8 @@ pub struct AeroLoads {
 /// Invalid integration inputs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StepError {
+    /// State, control, or an intermediate calculation is non-finite/invalid.
+    InvalidDynamicState,
     /// Time step is not finite and strictly positive.
     InvalidTimeStep,
     /// Density or gravity is negative or non-finite.
@@ -102,26 +104,39 @@ struct StateDerivative {
 }
 
 /// Calculates aerodynamic loads for a state without advancing time.
-#[must_use]
+///
+/// # Errors
+/// Rejects invalid state/control/environment and non-finite calculated loads.
 pub fn aerodynamic_loads(
     model: AircraftModel<'_>,
     state: RigidBodyState,
     controls: ControlSurfaceDeflection,
     environment: Environment,
-) -> AeroLoads {
+) -> Result<AeroLoads, StepError> {
+    validate_state(state)?;
+    validate_environment(environment)?;
+    if !controls.elevator_rad.is_finite() || !controls.rudder_rad.is_finite() {
+        return Err(StepError::InvalidDynamicState);
+    }
     let wind_body_mps = state
         .attitude_body_to_ned
         .rotate_ned_to_body(environment.wind_ned_mps);
     let relative_velocity = state.velocity_body_mps - wind_body_mps;
     let airspeed = relative_velocity.norm();
+    if !airspeed.is_finite() {
+        return Err(StepError::InvalidDynamicState);
+    }
     if airspeed < MIN_AIRSPEED_MPS {
-        return AeroLoads::default();
+        return Ok(AeroLoads::default());
     }
 
     let alpha = libm::atan2(relative_velocity.z, relative_velocity.x);
     let beta = libm::asin((relative_velocity.y / airspeed).clamp(-1.0, 1.0));
     let dynamic_pressure = 0.5 * environment.density_kg_m3 * airspeed * airspeed;
-    let base = model.longitudinal.sample(alpha);
+    let base = model
+        .longitudinal
+        .sample(alpha)
+        .map_err(|_| StepError::InvalidDynamicState)?;
     let normalized_roll_rate = state.rates_body_rad_s.x * model.reference_span_m / (2.0 * airspeed);
     let normalized_pitch_rate =
         state.rates_body_rad_s.y * model.reference_chord_m / (2.0 * airspeed);
@@ -180,7 +195,10 @@ pub fn aerodynamic_loads(
         scale * model.reference_chord_m * coefficients.pitch,
         scale * model.reference_span_m * coefficients.yaw,
     );
-    AeroLoads {
+    if !finite_vec(force_body_n) || !finite_vec(moment_body_nm) || !dynamic_pressure.is_finite() {
+        return Err(StepError::InvalidDynamicState);
+    }
+    Ok(AeroLoads {
         force_body_n,
         moment_body_nm,
         condition: FlightCondition {
@@ -191,7 +209,7 @@ pub fn aerodynamic_loads(
         },
         coefficients,
         induced_drag_ground_effect_ratio: ground_effect_ratio,
-    }
+    })
 }
 
 /// Advances the nonlinear rigid-body state by one fixed RK4 step.
@@ -204,6 +222,8 @@ pub fn aerodynamic_loads(
 ///
 /// Returns [`StepError::InvalidTimeStep`] for a non-positive/non-finite step,
 /// or [`StepError::InvalidEnvironment`] for invalid density, gravity, or wind.
+/// Invalid input state, controls, or overflowing stages return
+/// [`StepError::InvalidDynamicState`] without substituting a plausible state.
 pub fn step_rk4(
     model: AircraftModel<'_>,
     state: RigidBodyState,
@@ -214,21 +234,21 @@ pub fn step_rk4(
     if !dt_s.is_finite() || dt_s <= 0.0 {
         return Err(StepError::InvalidTimeStep);
     }
-    if !environment.density_kg_m3.is_finite()
-        || environment.density_kg_m3 < 0.0
-        || !environment.gravity_mps2.is_finite()
-        || environment.gravity_mps2 < 0.0
-        || !environment.wind_ned_mps.x.is_finite()
-        || !environment.wind_ned_mps.y.is_finite()
-        || !environment.wind_ned_mps.z.is_finite()
-    {
-        return Err(StepError::InvalidEnvironment);
-    }
-
-    let k1 = derivative(model, state, controls, environment);
-    let k2 = derivative(model, advance(state, k1, dt_s * 0.5), controls, environment);
-    let k3 = derivative(model, advance(state, k2, dt_s * 0.5), controls, environment);
-    let k4 = derivative(model, advance(state, k3, dt_s), controls, environment);
+    validate_environment(environment)?;
+    let k1 = derivative(model, state, controls, environment)?;
+    let k2 = derivative(
+        model,
+        advance(state, k1, dt_s * 0.5)?,
+        controls,
+        environment,
+    )?;
+    let k3 = derivative(
+        model,
+        advance(state, k2, dt_s * 0.5)?,
+        controls,
+        environment,
+    )?;
+    let k4 = derivative(model, advance(state, k3, dt_s)?, controls, environment)?;
     let weighted = StateDerivative {
         position_ned_m_s: (k1.position_ned_m_s
             + k2.position_ned_m_s * 2.0
@@ -251,7 +271,22 @@ pub fn step_rk4(
             + k4.angular_acceleration_rad_s2)
             / 6.0,
     };
-    Ok(advance(state, weighted, dt_s))
+    advance(state, weighted, dt_s)
+}
+
+fn validate_environment(environment: Environment) -> Result<(), StepError> {
+    if !environment.density_kg_m3.is_finite()
+        || environment.density_kg_m3 < 0.0
+        || !environment.gravity_mps2.is_finite()
+        || environment.gravity_mps2 < 0.0
+        || !environment.wind_ned_mps.x.is_finite()
+        || !environment.wind_ned_mps.y.is_finite()
+        || !environment.wind_ned_mps.z.is_finite()
+    {
+        return Err(StepError::InvalidEnvironment);
+    }
+
+    Ok(())
 }
 
 fn derivative(
@@ -259,8 +294,8 @@ fn derivative(
     state: RigidBodyState,
     controls: ControlSurfaceDeflection,
     environment: Environment,
-) -> StateDerivative {
-    let loads = aerodynamic_loads(model, state, controls, environment);
+) -> Result<StateDerivative, StepError> {
+    let loads = aerodynamic_loads(model, state, controls, environment)?;
     let gravity_body = state.attitude_body_to_ned.rotate_ned_to_body(Vec3::new(
         0.0,
         0.0,
@@ -278,24 +313,51 @@ fn derivative(
         state.rates_body_rad_s.y,
         state.rates_body_rad_s.z,
     );
-    StateDerivative {
+    Ok(StateDerivative {
         position_ned_m_s: state
             .attitude_body_to_ned
             .rotate_body_to_ned(state.velocity_body_mps),
         velocity_body_mps2: translational_acceleration,
         attitude_rate: state.attitude_body_to_ned.product(omega) * 0.5,
         angular_acceleration_rad_s2: angular_acceleration,
-    }
+    })
 }
 
-fn advance(state: RigidBodyState, derivative: StateDerivative, dt_s: f64) -> RigidBodyState {
-    RigidBodyState {
+fn advance(
+    state: RigidBodyState,
+    derivative: StateDerivative,
+    dt_s: f64,
+) -> Result<RigidBodyState, StepError> {
+    let attitude = state.attitude_body_to_ned + derivative.attitude_rate * dt_s;
+    let next = RigidBodyState {
         position_ned_m: state.position_ned_m + derivative.position_ned_m_s * dt_s,
         velocity_body_mps: state.velocity_body_mps + derivative.velocity_body_mps2 * dt_s,
-        attitude_body_to_ned: (state.attitude_body_to_ned + derivative.attitude_rate * dt_s)
-            .normalized(),
+        attitude_body_to_ned: attitude,
         rates_body_rad_s: state.rates_body_rad_s + derivative.angular_acceleration_rad_s2 * dt_s,
+    };
+    validate_state(next)?;
+    Ok(RigidBodyState {
+        attitude_body_to_ned: attitude.normalized(),
+        ..next
+    })
+}
+
+fn finite_vec(vector: Vec3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite()
+}
+
+fn validate_state(state: RigidBodyState) -> Result<(), StepError> {
+    let q = state.attitude_body_to_ned;
+    let norm_squared = q.w * q.w + q.x * q.x + q.y * q.y + q.z * q.z;
+    if !finite_vec(state.position_ned_m)
+        || !finite_vec(state.velocity_body_mps)
+        || !finite_vec(state.rates_body_rad_s)
+        || !norm_squared.is_finite()
+        || norm_squared <= 0.0
+    {
+        return Err(StepError::InvalidDynamicState);
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -325,6 +387,72 @@ mod tests {
             derivatives: AeroDerivatives::default(),
             ground_effect: GroundEffectModel::default(),
         }
+    }
+
+    #[test]
+    fn invalid_states_and_intermediate_overflow_return_errors() {
+        let points = [
+            AeroPoint {
+                alpha_rad: -1.0,
+                cl: 1.0,
+                cd: 0.1,
+                cm: -0.1,
+            },
+            AeroPoint {
+                alpha_rad: 1.0,
+                cl: 1.0,
+                cd: 0.1,
+                cm: -0.1,
+            },
+        ];
+        let state = RigidBodyState {
+            position_ned_m: Vec3::new(0.0, 0.0, -10.0),
+            velocity_body_mps: Vec3::new(5.0, 0.0, 0.0),
+            attitude_body_to_ned: Quaternion::IDENTITY,
+            rates_body_rad_s: Vec3::ZERO,
+        };
+        let environment = Environment {
+            density_kg_m3: 1.0,
+            gravity_mps2: 9.81,
+            wind_ned_mps: Vec3::ZERO,
+            ground_effect_enabled: false,
+        };
+        let controls = ControlSurfaceDeflection::default();
+        for invalid in [
+            RigidBodyState {
+                velocity_body_mps: Vec3::new(f64::NAN, 0.0, 0.0),
+                ..state
+            },
+            RigidBodyState {
+                position_ned_m: Vec3::new(f64::INFINITY, 0.0, 0.0),
+                ..state
+            },
+            RigidBodyState {
+                attitude_body_to_ned: Quaternion::new(0.0, 0.0, 0.0, 0.0),
+                ..state
+            },
+        ] {
+            assert_eq!(
+                step_rk4(model(&points), invalid, controls, environment, 0.01),
+                Err(super::StepError::InvalidDynamicState)
+            );
+        }
+        assert_eq!(
+            step_rk4(model(&points), state, controls, environment, 1.0e100),
+            Err(super::StepError::InvalidDynamicState)
+        );
+        assert_eq!(
+            aerodynamic_loads(
+                model(&points),
+                state,
+                ControlSurfaceDeflection {
+                    elevator_rad: f64::NAN,
+                    rudder_rad: 0.0
+                },
+                environment
+            ),
+            Err(super::StepError::InvalidDynamicState)
+        );
     }
 
     #[test]
@@ -361,6 +489,7 @@ mod tests {
                     ground_effect_enabled: false,
                 },
             );
+            let loads = loads.expect("valid dynamics");
             let expected = velocity * (-0.5 * velocity.norm() * aircraft.reference_area_m2 * 0.1);
             assert!((loads.force_body_n - expected).norm() < 1.0e-12);
         }
@@ -402,6 +531,7 @@ mod tests {
                 ground_effect_enabled: false,
             },
         );
+        let loads = loads.expect("valid dynamics");
         let scale = 0.5 * velocity.norm() * velocity.norm() * aircraft.reference_area_m2;
         assert!(
             (loads.force_body_n.y - scale * -0.2 * libm::asin(5.0 / velocity.norm())).abs()
@@ -480,6 +610,7 @@ mod tests {
                 ground_effect_enabled: false,
             },
         );
+        let loads = loads.expect("valid dynamics");
         assert_eq!(loads.force_body_n, Vec3::new(-10.0, 0.0, -100.0));
     }
 
@@ -524,6 +655,7 @@ mod tests {
                 ground_effect_enabled: true,
             },
         );
+        let loads = loads.expect("valid dynamics");
         assert!((loads.induced_drag_ground_effect_ratio - 0.2).abs() < 1.0e-12);
         assert!((loads.coefficients.drag - 0.06).abs() < 1.0e-12);
         assert!((loads.force_body_n.x + 6.0).abs() < 1.0e-12);

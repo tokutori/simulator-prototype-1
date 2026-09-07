@@ -56,8 +56,8 @@ pub fn steady_glide_trim(
         return Err(TrimError::InvalidInput);
     }
     let (mut lower_alpha, mut upper_alpha) = model.longitudinal.alpha_bounds();
-    let mut lower_cm = pitch_coefficient(model, lower_alpha, elevator_rad);
-    let upper_cm = pitch_coefficient(model, upper_alpha, elevator_rad);
+    let mut lower_cm = pitch_coefficient(model, lower_alpha, elevator_rad)?;
+    let upper_cm = pitch_coefficient(model, upper_alpha, elevator_rad)?;
     let alpha_rad = if lower_cm == 0.0 {
         lower_alpha
     } else if upper_cm == 0.0 {
@@ -68,7 +68,7 @@ pub fn steady_glide_trim(
         }
         for _ in 0..64 {
             let middle_alpha = (lower_alpha + upper_alpha) * 0.5;
-            let middle_cm = pitch_coefficient(model, middle_alpha, elevator_rad);
+            let middle_cm = pitch_coefficient(model, middle_alpha, elevator_rad)?;
             if lower_cm.is_sign_positive() == middle_cm.is_sign_positive() {
                 lower_alpha = middle_alpha;
                 lower_cm = middle_cm;
@@ -79,7 +79,10 @@ pub fn steady_glide_trim(
         (lower_alpha + upper_alpha) * 0.5
     };
 
-    let base = model.longitudinal.sample(alpha_rad);
+    let base = model
+        .longitudinal
+        .sample(alpha_rad)
+        .map_err(|_| TrimError::InvalidInput)?;
     let lift = base.cl + model.derivatives.cl_elevator * elevator_rad;
     let drag = base.cd;
     if !lift.is_finite() || lift <= 0.0 || !drag.is_finite() || drag < 0.0 {
@@ -99,14 +102,28 @@ pub fn steady_glide_trim(
         coefficients: AeroCoefficients {
             lift,
             drag,
-            pitch: pitch_coefficient(model, alpha_rad, elevator_rad),
+            pitch: pitch_coefficient(model, alpha_rad, elevator_rad)?,
             ..AeroCoefficients::default()
         },
     })
 }
 
-fn pitch_coefficient(model: AircraftModel<'_>, alpha_rad: f64, elevator_rad: f64) -> f64 {
-    model.longitudinal.sample(alpha_rad).cm + model.derivatives.cm_elevator * elevator_rad
+fn pitch_coefficient(
+    model: AircraftModel<'_>,
+    alpha_rad: f64,
+    elevator_rad: f64,
+) -> Result<f64, TrimError> {
+    let result = model
+        .longitudinal
+        .sample(alpha_rad)
+        .map_err(|_| TrimError::InvalidInput)?
+        .cm
+        + model.derivatives.cm_elevator * elevator_rad;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(TrimError::InvalidInput)
+    }
 }
 
 #[cfg(test)]

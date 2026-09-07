@@ -142,7 +142,8 @@ fn simulate(
     let termination = loop {
         let time_s = f64::from(steps) * dt_s;
         let environment = loaded.environment_at_north(state.position_ned_m.x);
-        let loads = aerodynamic_loads(model, state, controls, environment);
+        let loads =
+            aerodynamic_loads(model, state, controls, environment).map_err(AppError::Step)?;
         let sensor_sample = sensors
             .step(state, loads, environment, model.mass_kg, dt_s)
             .map_err(AppError::Sensor)?;
@@ -782,7 +783,10 @@ fn plot_error(error: impl std::fmt::Debug) -> AppError {
 }
 
 fn calculate_max_steps(duration_s: f64, dt_s: f64) -> Result<u32, AppError> {
-    if !duration_s.is_finite() || duration_s <= 0.0 || !dt_s.is_finite() || dt_s <= 0.0 {
+    if !duration_s.is_finite()
+        || duration_s <= 0.0
+        || !sim_cli::config::supported_simulation_step(dt_s)
+    {
         return Err(AppError::InvalidNumericArgument);
     }
     let exact_steps = duration_s / dt_s;

@@ -54,6 +54,8 @@ pub struct LongitudinalLinearization {
 /// Failure to construct a steady-glide longitudinal linear model.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinearizationError {
+    /// Numerical dynamics rejected a non-finite state or load.
+    Dynamics(crate::StepError),
     /// The steady-glide trim solve failed.
     Trim(TrimError),
     /// The trim helper is defined only for a still-air operating point.
@@ -95,6 +97,7 @@ pub fn linearize_steady_glide(
             rudder_rad: 0.0,
         },
     );
+    let trim_residual = trim_residual.map_err(LinearizationError::Dynamics)?;
     let steps = [
         VELOCITY_STEP_MPS,
         VELOCITY_STEP_MPS,
@@ -123,7 +126,11 @@ pub fn linearize_steady_glide(
                 rudder_rad: 0.0,
             },
         );
-        let column_values = derivative_array(plus_derivative, minus_derivative, step);
+        let column_values = derivative_array(
+            plus_derivative.map_err(LinearizationError::Dynamics)?,
+            minus_derivative.map_err(LinearizationError::Dynamics)?,
+            step,
+        );
         for row in 0..4 {
             state_matrix[row][column] = column_values[row];
         }
@@ -151,7 +158,11 @@ pub fn linearize_steady_glide(
         trim_state,
         trim_residual,
         state_matrix,
-        elevator_input: derivative_array(plus_control, minus_control, CONTROL_STEP_RAD),
+        elevator_input: derivative_array(
+            plus_control.map_err(LinearizationError::Dynamics)?,
+            minus_control.map_err(LinearizationError::Dynamics)?,
+            CONTROL_STEP_RAD,
+        ),
     })
 }
 
@@ -160,14 +171,14 @@ fn longitudinal_derivative(
     environment: Environment,
     state: LongitudinalState,
     controls: ControlSurfaceDeflection,
-) -> LongitudinalStateDerivative {
+) -> Result<LongitudinalStateDerivative, crate::StepError> {
     let rigid_state = RigidBodyState {
         position_ned_m: Vec3::ZERO,
         velocity_body_mps: Vec3::new(state.forward_velocity_mps, 0.0, state.down_velocity_mps),
         attitude_body_to_ned: Quaternion::from_euler(0.0, state.pitch_rad, 0.0),
         rates_body_rad_s: Vec3::new(0.0, state.pitch_rate_rad_s, 0.0),
     };
-    let loads = aerodynamic_loads(model, rigid_state, controls, environment);
+    let loads = aerodynamic_loads(model, rigid_state, controls, environment)?;
     let gravity_body = rigid_state
         .attitude_body_to_ned
         .rotate_ned_to_body(Vec3::new(0.0, 0.0, environment.gravity_mps2));
@@ -175,12 +186,12 @@ fn longitudinal_derivative(
         - rigid_state
             .rates_body_rad_s
             .cross(rigid_state.velocity_body_mps);
-    LongitudinalStateDerivative {
+    Ok(LongitudinalStateDerivative {
         forward_acceleration_mps2: acceleration.x,
         down_acceleration_mps2: acceleration.z,
         pitch_acceleration_rad_s2: loads.moment_body_nm.y / model.inertia_kg_m2.iyy,
         pitch_rate_rad_s: state.pitch_rate_rad_s,
-    }
+    })
 }
 
 fn perturb(state: LongitudinalState, index: usize, delta: f64) -> LongitudinalState {

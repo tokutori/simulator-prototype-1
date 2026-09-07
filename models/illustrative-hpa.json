@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.11.0",
+  "schema_version": "0.12.0",
   "metadata": {
     "name": "illustrative-hpa-rigid-v0",
     "provenance": "Synthetic coefficients for software verification only; not derived from a real Birdman aircraft",
@@ -29,7 +29,7 @@
     "area_m2": 20.0,
     "span_m": 25.0,
     "chord_m": 0.85,
-    "moment_reference": "centre of gravity; body x forward, y right, z down"
+    "moment_reference": { "point": "centre-of-mass" }
   },
   "aerodynamics": {
     "force_coefficient_basis": "wind-axes",

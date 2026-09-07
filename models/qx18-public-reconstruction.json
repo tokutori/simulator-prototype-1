@@ -1,6 +1,6 @@
 {
   "$schema": "./model-contract.schema.json",
-  "schema_version": "0.11.0",
+  "schema_version": "0.12.0",
   "metadata": {
     "name": "QX-18-public-data-reconstruction-v0.10-strict",
     "provenance": "Real QX-18 geometry plus a fixed-revision public BR Simulator coefficient reconstruction and datasheet-based avionics profiles",
@@ -122,7 +122,7 @@
     "area_m2": 18.042,
     "span_m": 25.133,
     "chord_m": 0.757,
-    "moment_reference": "BR Simulator centre of mass transformed to body x forward, y right, z down"
+    "moment_reference": { "point": "centre-of-mass" }
   },
   "aerodynamics": {
     "force_coefficient_basis": "stability-lift-drag-body-side",

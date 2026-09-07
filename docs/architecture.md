@@ -91,7 +91,7 @@ Inertiaは次のliteral tensor elementである。
 ## Aerodynamic contract
 
 longitudinal base coefficientは`alpha` tableから線形補間する。範囲外policyはmodel contract
-v0.11.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
+v0.12.0の`terminate`または`clamp-and-flag`で明示する。`terminate`は次stepへ進まず
 `aero-envelope-exit`で終了する。`clamp-and-flag`はsoftware test専用であり、endpoint保持に
 よって範囲外modelが妥当になるわけではない。どちらもvalidityをCSVとsummaryへ返す。
 
@@ -111,7 +111,9 @@ wind-side係数として再回転したりしない。QX-18の二つの再構成
 両者を同じ係数値のまま交換してはいけない。BR近似は大横滑りの実機validationを意味しない。
 参照: [作者の座標系・横力の定義](https://mtkbirdman.com/unity-aerodynamiccalculator)。
 momentはreference `S/b/c`でscaleする。
-JSONはmoment reference pointを必須metadataとして持つ。
+JSONのmoment referenceは`{"point":"centre-of-mass"}`のみ受け付ける構造化contract。
+body FRDのCGまわりの係数・慣性だけを扱う。任意文字列や空力中心／offset指定は拒否する。
+別の基準点のデータは設計側でCGへ`r × F`移送したうえで入力する必要がある。
 
 ## Release velocity contract
 
@@ -130,6 +132,13 @@ ground effectはmodelごとに無効化できる。現在は
 `Environment`として渡す。いずれもhidden clockやglobal environment stateを持たない。
 
 ## Determinism
+
+appの積分刻みは`0 < dt <= 0.01 s`に制限する。既存100 Hz sensor/control profileより
+粗いstepを黙って受理しないための解像度policyであり、任意の機体係数に対する安定性や
+収束の証明ではない。変更した機体／servoでは刻み半減による収束確認を別途行う。
+core自体には一律の上限を設けず、非有限state/control、ゼロ／非有限quaternion、
+RK4途中のoverflow、非有限空力query/loadをResult errorとして返す。異常な値をゼロや
+table端点へ置換して飛行を継続しない。
 
 - fixed time step
 - hidden global stateなし

@@ -33,13 +33,31 @@ async function initializeAnalysis(): Promise<void> {
 
 window.addEventListener("resize", () => {
   applyUiScale(window.innerWidth, window.innerHeight);
-  if (dataset) renderCharts(dataset.frames);
+  if (dataset && dataset.frames.length > 0) renderCharts(dataset.frames);
 });
 
 function render(value: FlightAnalysisDataset): void {
-  const summary = summarizeFlight(value.frames);
-  element("analysis-status").textContent = summary.surfaceContact ? "WATER CONTACT" : "RECORD ENDED ALOFT";
+  const outcome = value.outcome;
+  element("analysis-status").textContent = outcome.tag === "active" ? "ACTIVE FLIGHT SNAPSHOT"
+    : `${outcome.tag.toUpperCase()}: ${outcome.reason}`;
+  const unknown = value.frames.some(frame => frame.experiment.tag === "unknown");
+  const outOfRange = value.frames.some(frame => frame.experiment.tag === "measured" && !frame.experiment.aeroInRange);
+  const slow = value.frames.some(frame => frame.experiment.tag === "measured" && !frame.experiment.realTime);
+  const deadline = value.frames.some(frame => frame.experiment.tag === "measured" && frame.experiment.deadlineMissed);
+  const warnings = [unknown ? "Model/timing evidence UNKNOWN for some or all samples." : "",
+    outOfRange ? "AIRCRAFT MODEL OUT OF RANGE: trajectory is not validated within its aerodynamic envelope." : "",
+    slow ? "NOT REAL-TIME: human interaction was performed with slowed simulation." : "",
+    deadline ? "MCU DEADLINE MISSED." : "",
+    value.incidents.length ? `${value.incidents.length} telemetry stall(s) recorded; first at ${value.incidents[0]!.wallTimeIso}.` : "",
+    "Physical/cycle timing remains UNVALIDATED."].filter(Boolean);
+  element("analysis-error").textContent = warnings.join(" ");
+  element("analysis-error").hidden = false;
   element("analysis-name").textContent = value.name;
+  if (value.frames.length === 0) {
+    element("analysis-error").textContent += " No flight telemetry was produced before this session stopped.";
+    return;
+  }
+  const summary = summarizeFlight(value.frames);
   element("summary-time").textContent = `${summary.durationS.toFixed(2)} s`;
   element("summary-range").textContent = `${summary.rangeM.toFixed(1)} m`;
   element("summary-track").textContent = `${summary.trackM.toFixed(1)} m`;

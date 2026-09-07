@@ -1,8 +1,10 @@
-import type { FlightFrame } from "./types.ts";
-import { isRunIdentity } from "./types.ts";
+import type { FlightFrame, SessionOutcome, SessionIncident } from "./types.ts";
+import { isRunIdentity, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
 
 export interface FlightAnalysisDataset {
-  version: 2;
+  version: 3;
+  outcome: SessionOutcome;
+  incidents: SessionIncident[];
   name: string;
   storedAtIso: string;
   frames: FlightFrame[];
@@ -22,10 +24,13 @@ export function prepareAnalysisDataset(
   name: string,
   frames: readonly FlightFrame[],
   storedAt = new Date(),
+  outcome: SessionOutcome = { tag: "unknown", reason: "No session completion evidence supplied" },
+  incidents: readonly SessionIncident[] = [],
 ): FlightAnalysisDataset {
-  if (frames.length < 2) throw new Error("analysis requires at least two flight frames");
   return {
-    version: 2,
+    version: 3,
+    outcome,
+    incidents: [...incidents],
     name,
     storedAtIso: storedAt.toISOString(),
     // Preserve the evidence: decimation aliases oscillations and changes extrema/track length.
@@ -34,11 +39,19 @@ export function prepareAnalysisDataset(
 }
 
 export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
-  const candidate = JSON.parse(raw) as Partial<FlightAnalysisDataset>;
-  if (!candidate || candidate.version !== 2 || typeof candidate.name !== "string" || !Array.isArray(candidate.frames)) {
+  const candidate = JSON.parse(raw) as Partial<Omit<FlightAnalysisDataset, "version">> & { version?: number };
+  if (!candidate || ![2, 3].includes(candidate.version ?? 0) || typeof candidate.name !== "string" || !Array.isArray(candidate.frames)) {
     throw new Error("stored flight analysis has an unsupported format");
   }
-  if (candidate.frames.length < 2 || candidate.frames.some((frame) =>
+  if (candidate.version === 2) {
+    candidate.version = 3;
+    candidate.outcome = { tag: "unknown", reason: "Legacy recording has no session completion evidence" };
+    candidate.incidents = [];
+    candidate.frames = candidate.frames.map(frame => ({ ...frame, experiment: { tag: "unknown" } }));
+  }
+  if (!isSessionOutcome(candidate.outcome)) throw new Error("Invalid session completion evidence");
+  if (!Array.isArray(candidate.incidents) || !candidate.incidents.every(isSessionIncident)) throw new Error("Invalid session incidents");
+  if (candidate.frames.some((frame) =>
     typeof frame !== "object"
     || frame === null
     || !Number.isFinite((frame as FlightFrame).timeS)
@@ -47,10 +60,14 @@ export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
     || !validFrame(frame))) {
     throw new Error("stored flight analysis contains invalid telemetry");
   }
+  if (candidate.frames.some((frame, i, frames) => i > 0 && frame.timeS <= frames[i - 1]!.timeS)) {
+    throw new Error("Stored flight timestamps must increase strictly");
+  }
   return candidate as FlightAnalysisDataset;
 }
 
 function validFrame(value: FlightFrame): boolean {
+  if (!isExperimentEvidence(value.experiment)) return false;
   const numericKeys: readonly (keyof FlightFrame)[] = ["timeS", "northM", "eastM", "altitudeM",
     "rollRad", "pitchRad", "yawRad", "flightPathRad", "airspeedMps", "alphaRad", "elevatorRad", "rudderRad",
     "pilotElevator", "pilotRudder", "autonomy", "manualElevatorCommandRad", "manualRudderCommandRad",

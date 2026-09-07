@@ -5,6 +5,7 @@ import { LivePlayback } from "./live-playback.ts";
 import type { FlightFrame } from "./types.ts";
 
 const frame = (timeS: number, northM: number): FlightFrame => ({
+  experiment: { tag: "unknown" },
   controlTelemetry: { tag: "unavailable" },
   timeS,
   northM,

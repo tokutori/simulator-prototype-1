@@ -44,13 +44,15 @@ import {
   type InputSettings,
 } from "./input.ts";
 import { LivePlayback } from "./live-playback.ts";
-import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
+import { frameFromLive, interpolateFrame, parseFlightCsv, parseCsvOutcome, parseCsvIncidents, experimentColumns, experimentCsvValues } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
   CameraMode,
   FlightFrame,
   InteractiveObservation,
   PilotCommandMessage,
+  SessionOutcome,
+  SessionIncident,
 } from "./types.ts";
 import { applyUiScale } from "./ui-scale.ts";
 import { resetXrRig, setXrCockpitRig } from "./xr-camera.ts";
@@ -89,6 +91,24 @@ let cameraMode: CameraMode = "chase";
 let cameraModeBeforeXr: CameraMode = "chase";
 let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
+let replayOutcome: SessionOutcome = { tag: "unknown", reason: "No session completion evidence" };
+let liveOutcome: SessionOutcome = { tag: "active" };
+let liveIncidents: SessionIncident[] = [];
+let replayIncidents: SessionIncident[] = [];
+let lastTelemetryReceiptMs = performance.now();
+let lastWatchdogCheckMs = 0;
+let archiveSequence = 0;
+const previousAnalysis = document.createElement("a");
+previousAnalysis.id = "previous-analysis";
+previousAnalysis.textContent = "Previous stopped flight";
+previousAnalysis.target = "_blank";
+previousAnalysis.rel = "noopener";
+previousAnalysis.hidden = true;
+element("open-analysis").after(previousAnalysis);
+try {
+  const id = localStorage.getItem("birdman-last-stopped-flight");
+  if (id) { previousAnalysis.href = `/analysis.html?flight=${encodeURIComponent(id)}`; previousAnalysis.hidden = false; }
+} catch { /* Archiving itself uses IndexedDB; blocked optional last-link persistence is harmless. */ }
 let liveFrames: FlightFrame[] = [];
 let liveFrame: FlightFrame | undefined;
 let livePlayback = new LivePlayback();
@@ -126,6 +146,15 @@ resize();
 function animate(nowMs: number): void {
   const deltaS = Math.min(0.05, Math.max(0, (nowMs - previousAnimationMs) / 1000));
   previousAnimationMs = nowMs;
+  if (nowMs - lastWatchdogCheckMs >= 250) {
+    lastWatchdogCheckMs = nowMs;
+    if ((appState.tag === "mcu-running" || appState.tag === "mcu-too-slow" || appState.tag === "mcu-stalled")
+      && nowMs - lastTelemetryReceiptMs >= 500) {
+      if (appState.tag !== "mcu-stalled") liveIncidents.push({ kind: "telemetry-stall", wallTimeIso: new Date().toISOString(),
+        sinceLastReceiptMs: nowMs - lastTelemetryReceiptMs });
+      dispatch({ type: "mcu-stale", sessionId: appState.sessionId, ageMs: nowMs - lastTelemetryReceiptMs });
+    }
+  }
   const gamepad = navigator.getGamepads?.()[settings.gamepadIndex] ?? null;
   element("gamepad-status").textContent = gamepad
     ? `Gamepad ${gamepad.index}: ${gamepad.id}`
@@ -344,7 +373,8 @@ function bindControls(): void {
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (!file) return;
     try {
-      loadReplay(parseFlightCsv(await file.text()), file.name);
+      const text = await file.text();
+      loadReplay(parseFlightCsv(text), file.name, true, parseCsvOutcome(text), parseCsvIncidents(text));
     } catch (error) {
       showMessage(String(error));
     }
@@ -426,15 +456,19 @@ async function loadDefaultReplay(selectMode: boolean): Promise<void> {
   try {
     const response = await fetch("/sample-flight.csv");
     if (!response.ok) throw new Error(`sample flight HTTP ${response.status}`);
-    loadReplay(parseFlightCsv(await response.text()), "sample-flight.csv", selectMode);
+    const text = await response.text();
+    loadReplay(parseFlightCsv(text), "sample-flight.csv", selectMode, parseCsvOutcome(text), parseCsvIncidents(text));
   } catch (error) {
     showMessage(`Default replay could not be loaded: ${String(error)}`);
   }
 }
 
-function loadReplay(frames: FlightFrame[], name: string, selectMode = true): void {
+function loadReplay(frames: FlightFrame[], name: string, selectMode = true,
+  outcome: SessionOutcome = { tag: "unknown", reason: "No session completion evidence" }, incidents: SessionIncident[] = []): void {
   replayFrames = frames;
   replayName = name;
+  replayOutcome = outcome;
+  replayIncidents = incidents;
   playbackTimeS = frames[0]?.timeS ?? 0;
   replayPlaying = true;
   updatePlayButton();
@@ -472,8 +506,17 @@ function setMode(next: "replay" | "live"): void {
 }
 
 function dispatch(message: AppMsg): void {
+  const wasActive = acceptsSessionEvent(appState, appState.sessionId);
+  if (wasActive && (message.type === "select-replay" || message.type === "request-mcu")) {
+    liveOutcome = { tag: "aborted", reason: message.type === "request-mcu" ? "User restarted the flight" : "User switched to replay" };
+    archiveStoppedSession();
+  }
   const [next, effect] = updateApp(appState, message);
   appState = next;
+  if (wasActive && (next.tag === "mcu-ended" || next.tag === "mcu-failed")) {
+    liveOutcome = next.tag === "mcu-ended" ? { tag: "ended", reason: next.reason } : { tag: "failed", reason: next.error };
+    archiveStoppedSession();
+  }
   if (appState.tag === "mcu-ended" || appState.tag === "mcu-failed") livePlayback.finish();
   renderAppState();
   runEffect(effect);
@@ -508,6 +551,9 @@ function connectLive(sessionId: number): void {
   disconnectLive();
   liveFrame = undefined;
   liveFrames = [];
+  liveOutcome = { tag: "active" };
+  liveIncidents = [];
+  lastTelemetryReceiptMs = performance.now();
   livePlayback = new LivePlayback();
   chaseCamera.reset();
   pilotInput.clear();
@@ -538,6 +584,7 @@ function connectLive(sessionId: number): void {
         return;
       }
       const nextFrame = frameFromLive(message);
+      lastTelemetryReceiptMs = performance.now();
       dispatch({
         type: "mcu-telemetry",
         sessionId,
@@ -676,12 +723,25 @@ async function openCurrentAnalysis(): Promise<void> {
   tab.document.body.textContent = "Saving complete flight data for analysis…";
   try {
     const id = crypto.randomUUID();
-    await storeAnalysis(id, prepareAnalysisDataset(name, frames));
+    await storeAnalysis(id, prepareAnalysisDataset(name, frames, new Date(), isInteractive(appState) ? liveOutcome : replayOutcome,
+      isInteractive(appState) ? liveIncidents : replayIncidents));
     tab.location.replace(`/analysis.html?flight=${encodeURIComponent(id)}`);
   } catch (error) {
     tab.close();
     showMessage(`Flight analysis could not be opened: ${String(error)}`);
   }
+}
+
+function archiveStoppedSession(): void {
+  const sequence = ++archiveSequence;
+  const id = crypto.randomUUID();
+  const dataset = prepareAnalysisDataset("Stopped actual-UF2 flight", liveFrames, new Date(), liveOutcome, liveIncidents);
+  void storeAnalysis(id, dataset).then(() => {
+    if (sequence !== archiveSequence) return;
+    previousAnalysis.href = `/analysis.html?flight=${encodeURIComponent(id)}`;
+    previousAnalysis.hidden = false;
+    try { localStorage.setItem("birdman-last-stopped-flight", id); } catch { /* Link remains available in this tab. */ }
+  }).catch(error => showMessage(`Stopped flight could not be archived: ${String(error)}`));
 }
 
 function setSurfaceTrack(id: string, actualDeg: number, commandDeg: number): void {
@@ -786,6 +846,8 @@ function downloadLiveLog(): void {
     "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
     "safe_rudder_command_deg", "uf2_sha256", "model_sha256", "plant_sha256",
     "release_mcu_time_us", "plant_interval_start_s",
+    ...experimentColumns,
+    "virtual_platform_sha256", "scenario_sha256",
   ];
   const rows = liveFrames.map((frame) => [
     frame.timeS, frame.northM, frame.eastM, frame.altitudeM,
@@ -810,8 +872,12 @@ function downloadLiveLog(): void {
       frame.controlTelemetry.runIdentity.plant_sha256,
       frame.controlTelemetry.releaseMcuTimeUs, frame.controlTelemetry.plantIntervalStartS,
     ] : Array.from({ length: 14 }, () => "")),
+    ...experimentCsvValues(frame.experiment),
+    frame.controlTelemetry.tag === "firmware" ? frame.controlTelemetry.runIdentity.virtual_platform_sha256 ?? "" : "",
+    frame.controlTelemetry.tag === "firmware" ? frame.controlTelemetry.runIdentity.scenario_sha256 ?? "" : "",
   ].join(","));
-  const blob = new Blob([[header.join(","), ...rows].join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([[`# birdman-session ${JSON.stringify(liveOutcome)}`, `# birdman-incidents ${JSON.stringify(liveIncidents)}`,
+    header.join(","), ...rows].join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

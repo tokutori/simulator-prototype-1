@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
-import type { InteractiveObservation } from "./types.ts";
+import { frameFromLive, interpolateFrame, parseFlightCsv, parseCsvOutcome, parseCsvIncidents, experimentColumns, experimentCsvValues } from "./replay.ts";
+import type { InteractiveObservation, ExperimentEvidence } from "./types.ts";
 
 test("CSV parser accepts simulator output and interpolation is continuous", () => {
   const frames = parseFlightCsv(
@@ -36,9 +36,11 @@ test("live JSON without firmware evidence is rejected instead of plotted as real
 
 test("live boundary requires unscaled CPU and carries reproducible binary identity", () => {
   const observation: InteractiveObservation = {
+    aero_in_range: false,
     firmware_sequence: 1, firmware_time_us: 1_000_000, automatic_valid: true,
     release_mcu_time_us: 995000, plant_interval_start_s: 0,
-    run_identity: { uf2_sha256: "a".repeat(64), model_sha256: "b".repeat(64), plant_sha256: "c".repeat(64) },
+    run_identity: { uf2_sha256: "a".repeat(64), model_sha256: "b".repeat(64), plant_sha256: "c".repeat(64),
+      virtual_platform_sha256: "d".repeat(64), scenario_sha256: "e".repeat(64) },
     safe_elevator_command_rad: 0, safe_rudder_command_rad: 0.03,
     observed_elevator_command_rad: 0, observed_rudder_command_rad: 0,
     elevator_pwm_sample_time_us: 990000, rudder_pwm_sample_time_us: 990000,
@@ -48,7 +50,7 @@ test("live boundary requires unscaled CPU and carries reproducible binary identi
     manual_elevator_command_rad: 0, manual_rudder_command_rad: 0, automatic_elevator_command_rad: 0,
     automatic_rudder_command_rad: 0, mixed_elevator_command_rad: 0, mixed_rudder_command_rad: 0,
     surface_contact: false, backend: "rp2040js-actual-uf2",
-    emulation: { timing_acceleration: 1, processing_ms: 50, processing_average_ms: 50, real_time_ratio: 0.2,
+    emulation: { wall_elapsed_ms: 50, timing_acceleration: 1, processing_ms: 50, processing_average_ms: 50, real_time_ratio: 0.2,
       lag_ms: 40, deadline_missed: false, real_time: false, timing_validated: false },
   };
   const result = frameFromLive(observation).controlTelemetry;
@@ -61,6 +63,25 @@ test("live boundary requires unscaled CPU and carries reproducible binary identi
   }
   assert.throws(() => frameFromLive({ ...observation, emulation: { ...observation.emulation, timing_acceleration: 50 } } as unknown as InteractiveObservation), /scaled CPU/);
   assert.throws(() => frameFromLive({ ...observation, run_identity: { ...observation.run_identity, uf2_sha256: "bad" } }), /run identity/);
+  assert.equal(frameFromLive(observation).experiment.tag, "measured");
+  assert.throws(() => frameFromLive({ ...observation, emulation: { ...observation.emulation, real_time_ratio: Number.NaN } }), /timing or model/);
+  assert.throws(() => frameFromLive({ ...observation, aero_in_range: undefined } as unknown as InteractiveObservation), /timing or model/);
+});
+
+test("CSV preserves envelope, wall timing, deadline and explicit session/incident evidence", () => {
+  const evidence: ExperimentEvidence = { tag: "measured", aeroInRange: false, wallElapsedMs: 500,
+    processingMs: 30, processingAverageMs: 25, realTimeRatio: 0.37, lagMs: 300,
+    deadlineMissed: true, realTime: false, timingValidated: false };
+  const outcome = { tag: "failed", reason: "model envelope violation, alpha outside allowed range" };
+  const incidents = [{ kind: "telemetry-stall", wallTimeIso: "2026-09-08T00:00:00Z", sinceLastReceiptMs: 650 }];
+  const csv = `# birdman-session ${JSON.stringify(outcome)}\n# birdman-incidents ${JSON.stringify(incidents)}\n`
+    + `time_s,north_m,altitude_m,pitch_deg,${experimentColumns.join(",")}\n`
+    + `0,0,10,0,${experimentCsvValues(evidence).join(",")}\n1,10,9,0,${experimentCsvValues(evidence).join(",")}\n`;
+  assert.deepEqual(parseFlightCsv(csv)[0]!.experiment, evidence);
+  assert.deepEqual(parseCsvOutcome(csv), outcome);
+  assert.deepEqual(parseCsvIncidents(csv), incidents);
+  assert.equal(parseCsvOutcome("time_s,north_m").tag, "unknown");
+  assert.throws(() => parseFlightCsv(csv.replace("measured,false,500", "measured,false,")), /Missing experiment evidence/);
 });
 
 test("CSV parser rejects non-monotonic time", () => {

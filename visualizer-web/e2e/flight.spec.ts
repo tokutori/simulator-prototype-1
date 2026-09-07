@@ -12,7 +12,9 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
   await expect(page.locator('#open-analysis')).toBeEnabled();
   await page.locator('#autonomy').fill('0');
-  await page.locator('canvas').click({ position: { x: 100, y: 100 } });
+  // Restart keeps a normal button focused; keyboard flight input must still work.
+  await page.locator('#restart-live').click();
+  await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
   await page.keyboard.down('s');
   await expect.poll(() => frames.some(frame => frame.pilot_elevator === 1 && frame.autonomy === 0), { timeout: 15_000 }).toBe(true);
   await page.keyboard.up('s');
@@ -32,12 +34,14 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   const analysis = await opened;
   await expect(analysis).toHaveURL(/analysis\.html\?flight=/);
   await expect(analysis.locator('#analysis-content')).toBeVisible();
+  await expect(analysis.locator('#analysis-status')).toHaveText('ACTIVE FLIGHT SNAPSHOT');
   const duration = await analysis.locator('#summary-time').textContent();
   await analysis.reload();
   await expect(analysis.locator('#analysis-content')).toBeVisible();
   await expect(analysis.locator('#summary-time')).toHaveText(duration!);
   await page.locator('#replay-mode').click();
   await expect(page.locator('#mode-badge')).toHaveText('REPLAY');
+  await expect(page.locator('#previous-analysis')).toBeVisible();
   expect(errors).toEqual([]);
 });
 

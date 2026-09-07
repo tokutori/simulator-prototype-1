@@ -11,6 +11,7 @@ import type { FlightFrame } from "./types.ts";
 
 function frame(timeS: number, northM: number, eastM: number): FlightFrame {
   return {
+    experiment: { tag: "unknown" },
     controlTelemetry: { tag: "unavailable" },
     timeS, northM, eastM, altitudeM: 10 - timeS, rollRad: timeS * 0.1,
     pitchRad: 0, yawRad: 0, flightPathRad: 0, airspeedMps: 5 + timeS,
@@ -51,4 +52,31 @@ test("analysis preserves all long-run samples and brief extrema", () => {
   assert.equal(dataset.frames.length, 12001);
   assert.equal(summarizeFlight(dataset.frames).maximumAltitudeM, 99);
   assert.equal(parseAnalysisDataset(JSON.stringify(dataset)).frames.length, 12001);
+});
+
+test("all session outcomes and stall incidents survive storage without inferring a successful end", () => {
+  const frames = [frame(0, 0, 0), frame(1, 1, 0)];
+  for (const outcome of [{ tag: "active" }, { tag: "ended", reason: "surface contact" },
+    { tag: "failed", reason: "aircraft model envelope violation" }, { tag: "failed", reason: "MCU disconnected" },
+    { tag: "aborted", reason: "User restarted the flight" }] as const) {
+    const incidents = [{ kind: "telemetry-stall" as const, wallTimeIso: "2026-09-08T00:00:00Z", sinceLastReceiptMs: 750 }];
+    const restored = parseAnalysisDataset(JSON.stringify(prepareAnalysisDataset("test", frames, new Date(), outcome, incidents)));
+    assert.deepEqual(restored.outcome, outcome);
+    assert.deepEqual(restored.incidents, incidents);
+  }
+});
+
+test("preflight failure is retained even when no telemetry exists", () => {
+  const record = prepareAnalysisDataset("failed startup", [], new Date(), { tag: "failed", reason: "UF2 did not arm" });
+  assert.deepEqual(parseAnalysisDataset(JSON.stringify(record)).outcome, record.outcome);
+});
+
+test("legacy analysis is explicitly unknown; malformed timing and nonmonotonic samples are rejected", () => {
+  const frames = [frame(0, 0, 0), frame(1, 1, 0)];
+  const old = { version: 2, name: "old", frames };
+  const restored = parseAnalysisDataset(JSON.stringify(old));
+  assert.equal(restored.outcome.tag, "unknown");
+  assert.equal(restored.frames[0]!.experiment.tag, "unknown");
+  const dataset = prepareAnalysisDataset("test", frames);
+  assert.throws(() => parseAnalysisDataset(JSON.stringify({ ...dataset, frames: [frames[1], frames[0]] })), /increase strictly/);
 });

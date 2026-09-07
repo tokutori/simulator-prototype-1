@@ -14,6 +14,7 @@ export type AppState = { sessionId: number } & (
   | { tag: "mcu-connecting" }
   | { tag: "mcu-running"; performance: EmulationPerformance }
   | { tag: "mcu-too-slow"; performance: EmulationPerformance }
+  | { tag: "mcu-stalled"; ageMs: number; performance: EmulationPerformance }
   | { tag: "mcu-ended"; reason: string; performance?: EmulationPerformance }
   | { tag: "mcu-failed"; error: string });
 
@@ -22,6 +23,7 @@ export type AppMsg =
   | { type: "request-mcu" }
   | { type: "mcu-telemetry"; sessionId: number; performance: EmulationPerformance }
   | { type: "mcu-ended"; sessionId: number; reason: string }
+  | { type: "mcu-stale"; sessionId: number; ageMs: number }
   | { type: "mcu-failed"; sessionId: number; error: string };
 
 export type Effect = { type: "none" } | { type: "connect-mcu"; sessionId: number } | { type: "disconnect-mcu" };
@@ -29,7 +31,7 @@ export type Effect = { type: "none" } | { type: "connect-mcu"; sessionId: number
 /** Terminal states cannot be revived by queued socket events; restart creates a new generation. */
 export function acceptsSessionEvent(state: AppState, sessionId: number): boolean {
   return state.sessionId === sessionId && (
-    state.tag === "mcu-connecting" || state.tag === "mcu-running" || state.tag === "mcu-too-slow"
+    state.tag === "mcu-connecting" || state.tag === "mcu-running" || state.tag === "mcu-too-slow" || state.tag === "mcu-stalled"
   );
 }
 
@@ -46,6 +48,10 @@ export function update(state: AppState, message: AppMsg): readonly [AppState, Ef
       return [message.performance.realTime && !message.performance.deadlineMissed
         ? { tag: "mcu-running", sessionId: message.sessionId, performance: message.performance }
         : { tag: "mcu-too-slow", sessionId: message.sessionId, performance: message.performance }, { type: "none" }];
+    case "mcu-stale":
+      return "performance" in state && state.performance && message.ageMs >= 500
+        ? [{ tag: "mcu-stalled", sessionId: message.sessionId, ageMs: message.ageMs, performance: state.performance }, { type: "none" }]
+        : [state, { type: "none" }];
     case "mcu-ended":
       return [{
         tag: "mcu-ended",
@@ -77,6 +83,11 @@ export function present(state: AppState): AppPresentation {
     case "mcu-too-slow": return {
       ...runningPresentation(state.performance),
       warning: "MCU EMULATION TOO SLOW — NOT REAL-TIME",
+    };
+    case "mcu-stalled": return {
+      ...runningPresentation(state.performance),
+      status: "TELEMETRY STALLED",
+      warning: `NO TELEMETRY FOR ${state.ageMs.toFixed(0)} ms — NOT REAL-TIME; displayed pose is stale`,
     };
     case "mcu-ended": return { mode: "INTERACTIVE / RP2040JS", status: state.reason, performance: state.performance ? formatPerformance(state.performance) : "actual UF2" };
     case "mcu-failed": return { mode: "INTERACTIVE / RP2040JS", status: "MCU bridge failed", performance: "actual UF2 unavailable", warning: state.error };

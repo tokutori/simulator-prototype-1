@@ -2,13 +2,18 @@ export interface RunIdentity {
   uf2_sha256: string;
   model_sha256: string;
   plant_sha256: string;
+  /** Absent only in legacy recordings; live adapters require both fingerprints. */
+  virtual_platform_sha256?: string;
+  scenario_sha256?: string;
 }
 
 export function isRunIdentity(value: unknown): value is RunIdentity {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<RunIdentity>;
   return [candidate.uf2_sha256, candidate.model_sha256, candidate.plant_sha256]
-    .every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash));
+    .every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))
+    && [candidate.virtual_platform_sha256, candidate.scenario_sha256]
+      .every(hash => hash === undefined || (typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)));
 }
 
 export type ControlTelemetry = { tag: "unavailable" } | {
@@ -28,6 +33,7 @@ export type ControlTelemetry = { tag: "unavailable" } | {
 };
 
 export interface FlightFrame {
+  experiment: ExperimentEvidence;
   controlTelemetry: ControlTelemetry;
   timeS: number;
   northM: number;
@@ -54,6 +60,7 @@ export interface FlightFrame {
 }
 
 export interface InteractiveObservation {
+  aero_in_range: boolean;
   run_identity: RunIdentity;
   firmware_sequence: number;
   firmware_time_us: number;
@@ -90,6 +97,7 @@ export interface InteractiveObservation {
   surface_contact: boolean;
   backend: "rp2040js-actual-uf2";
   emulation: {
+    wall_elapsed_ms: number;
     timing_acceleration: 1;
     processing_ms: number;
     processing_average_ms: number;
@@ -99,6 +107,47 @@ export interface InteractiveObservation {
     real_time: boolean;
     timing_validated: false;
   };
+}
+
+export type SessionOutcome = { tag: "active" } | { tag: "ended" | "failed" | "aborted" | "unknown"; reason: string };
+export interface SessionIncident { kind: "telemetry-stall"; wallTimeIso: string; sinceLastReceiptMs: number }
+
+export function isSessionIncident(value: unknown): value is SessionIncident {
+  if (!value || typeof value !== "object") return false;
+  const incident = value as SessionIncident;
+  return incident.kind === "telemetry-stall" && typeof incident.wallTimeIso === "string"
+    && Number.isFinite(Date.parse(incident.wallTimeIso)) && Number.isFinite(incident.sinceLastReceiptMs) && incident.sinceLastReceiptMs >= 500;
+}
+
+export type ExperimentEvidence = { tag: "unknown" } | {
+  tag: "measured";
+  aeroInRange: boolean;
+  wallElapsedMs: number;
+  processingMs: number;
+  processingAverageMs: number;
+  realTimeRatio: number;
+  lagMs: number;
+  deadlineMissed: boolean;
+  realTime: boolean;
+  timingValidated: false;
+};
+
+export function isSessionOutcome(value: unknown): value is SessionOutcome {
+  if (!value || typeof value !== "object") return false;
+  const outcome = value as Partial<SessionOutcome>;
+  return outcome.tag === "active" || (["ended", "failed", "aborted", "unknown"].includes(outcome.tag ?? "")
+    && "reason" in outcome && typeof outcome.reason === "string");
+}
+
+export function isExperimentEvidence(value: unknown): value is ExperimentEvidence {
+  if (!value || typeof value !== "object") return false;
+  const evidence = value as ExperimentEvidence;
+  if (evidence.tag === "unknown") return true;
+  return evidence.tag === "measured" && evidence.timingValidated === false
+    && [evidence.aeroInRange, evidence.deadlineMissed, evidence.realTime].every(v => typeof v === "boolean")
+    && [evidence.wallElapsedMs, evidence.processingMs, evidence.processingAverageMs, evidence.realTimeRatio, evidence.lagMs]
+      .every(v => typeof v === "number" && Number.isFinite(v))
+    && evidence.wallElapsedMs >= 0 && evidence.processingMs >= 0 && evidence.processingAverageMs >= 0 && evidence.realTimeRatio >= 0;
 }
 
 export interface PilotCommandMessage {

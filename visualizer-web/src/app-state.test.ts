@@ -33,6 +33,17 @@ test("slow or deadline-missed emulation is an explicit warning state", () => {
   assert.match(present(state).warning ?? "", /NOT REAL-TIME/);
 });
 
+test("receipt-age watchdog warns without telemetry and only fresh telemetry recovers", () => {
+  const running: AppState = { tag: "mcu-running", sessionId: 4, performance: realtime };
+  const [stalled] = update(running, { type: "mcu-stale", sessionId: 4, ageMs: 750 });
+  assert.equal(stalled.tag, "mcu-stalled");
+  assert.match(present(stalled).warning ?? "", /NO TELEMETRY.*NOT REAL-TIME/);
+  assert.equal(update(stalled, { type: "mcu-telemetry", sessionId: 3, performance: realtime })[0], stalled);
+  assert.equal(update(stalled, { type: "mcu-telemetry", sessionId: 4, performance: realtime })[0].tag, "mcu-running");
+  const [failed] = update(stalled, { type: "mcu-failed", sessionId: 4, error: "wall-clock response timeout" });
+  assert.equal(failed.tag, "mcu-failed");
+});
+
 test("restart rejects every old connection event without changing state", () => {
   const [restarted] = update({ tag: "mcu-running", sessionId: 3, performance: realtime }, { type: "request-mcu" });
   for (const message of [

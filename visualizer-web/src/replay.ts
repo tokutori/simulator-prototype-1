@@ -1,10 +1,20 @@
-import type { FlightFrame, InteractiveObservation } from "./types.ts";
-import { isRunIdentity } from "./types.ts";
+import type { FlightFrame, InteractiveObservation, ExperimentEvidence, SessionOutcome, SessionIncident } from "./types.ts";
+import { isRunIdentity, isExperimentEvidence, isSessionOutcome, isSessionIncident } from "./types.ts";
 
 const degree = Math.PI / 180;
 
+export const experimentColumns = ["experiment_tag", "aero_in_range", "wall_elapsed_ms", "processing_ms",
+  "processing_average_ms", "real_time_ratio", "lag_ms", "deadline_missed", "real_time", "timing_validated"] as const;
+
+export function experimentCsvValues(evidence: ExperimentEvidence): (string | number | boolean)[] {
+  return evidence.tag === "unknown" ? ["unknown", ...Array.from({ length: 9 }, () => "")]
+    : ["measured", evidence.aeroInRange, evidence.wallElapsedMs, evidence.processingMs,
+      evidence.processingAverageMs, evidence.realTimeRatio, evidence.lagMs, evidence.deadlineMissed,
+      evidence.realTime, evidence.timingValidated];
+}
+
 export function parseFlightCsv(text: string): FlightFrame[] {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "");
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim() !== "" && !line.startsWith("#"));
   const headerLine = lines.shift();
   if (!headerLine) {
     throw new Error("CSV is empty");
@@ -52,11 +62,21 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
       || typeof observation.automatic_valid !== "boolean" || typeof observation.surface_contact !== "boolean") {
     throw new Error("Invalid actual-UF2 telemetry fields");
   }
-  if (!isRunIdentity(observation.run_identity) || observation.emulation?.timing_acceleration !== 1
+  if (!isRunIdentity(observation.run_identity) || !observation.run_identity.virtual_platform_sha256 || !observation.run_identity.scenario_sha256
+      || observation.emulation?.timing_acceleration !== 1
       || observation.emulation?.timing_validated !== false) {
     throw new Error("Unverified run identity or scaled CPU timing rejected");
   }
+  const experiment: ExperimentEvidence = {
+    tag: "measured", aeroInRange: observation.aero_in_range,
+    wallElapsedMs: observation.emulation.wall_elapsed_ms, processingMs: observation.emulation.processing_ms,
+    processingAverageMs: observation.emulation.processing_average_ms, realTimeRatio: observation.emulation.real_time_ratio,
+    lagMs: observation.emulation.lag_ms, deadlineMissed: observation.emulation.deadline_missed,
+    realTime: observation.emulation.real_time, timingValidated: observation.emulation.timing_validated,
+  };
+  if (!isExperimentEvidence(experiment)) throw new Error("Invalid experiment timing or model validity evidence");
   return {
+    experiment,
     controlTelemetry: { tag: "firmware", sequence: observation.firmware_sequence,
       runIdentity: observation.run_identity,
       timeUs: observation.firmware_time_us, automaticValid: observation.automatic_valid,
@@ -144,14 +164,29 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
     if (raw === "1" || raw === "true") return true;
     throw new Error(`invalid boolean ${name} at CSV row ${lineNumber}`);
   };
-  const identity = { uf2_sha256: row.get("uf2_sha256"), model_sha256: row.get("model_sha256"), plant_sha256: row.get("plant_sha256") };
+  const identity = { uf2_sha256: row.get("uf2_sha256"), model_sha256: row.get("model_sha256"), plant_sha256: row.get("plant_sha256"),
+    virtual_platform_sha256: row.get("virtual_platform_sha256") || undefined, scenario_sha256: row.get("scenario_sha256") || undefined };
   if (row.get("firmware_sequence") && !isRunIdentity(identity)) throw new Error(`Missing or invalid run identity at CSV row ${lineNumber}`);
+  const tag = row.get("experiment_tag");
+  if (tag && tag !== "unknown" && tag !== "measured") throw new Error(`Invalid experiment tag at CSV row ${lineNumber}`);
+  if (tag === "measured" && experimentColumns.some(column => !row.get(column))) {
+    throw new Error(`Missing experiment evidence at CSV row ${lineNumber}`);
+  }
+  const experiment: unknown = tag !== "measured" ? { tag: "unknown" } : {
+    tag, aeroInRange: boolean("aero_in_range"), wallElapsedMs: number("wall_elapsed_ms"),
+    processingMs: number("processing_ms"), processingAverageMs: number("processing_average_ms"),
+    realTimeRatio: number("real_time_ratio"), lagMs: number("lag_ms"), deadlineMissed: boolean("deadline_missed"),
+    realTime: boolean("real_time"), timingValidated: boolean("timing_validated"),
+  };
+  if (!isExperimentEvidence(experiment)) throw new Error(`Invalid experiment evidence at CSV row ${lineNumber}`);
   return {
+    experiment,
     timeS: number("time_s"),
     controlTelemetry: row.get("firmware_sequence") ? {
       tag: "firmware", sequence: number("firmware_sequence"), timeUs: number("firmware_time_us"),
       releaseMcuTimeUs: number("release_mcu_time_us"), plantIntervalStartS: number("plant_interval_start_s"),
-      runIdentity: { uf2_sha256: identity.uf2_sha256 ?? "", model_sha256: identity.model_sha256 ?? "", plant_sha256: identity.plant_sha256 ?? "" },
+      runIdentity: { uf2_sha256: identity.uf2_sha256 ?? "", model_sha256: identity.model_sha256 ?? "", plant_sha256: identity.plant_sha256 ?? "",
+        virtual_platform_sha256: identity.virtual_platform_sha256, scenario_sha256: identity.scenario_sha256 },
       automaticValid: boolean("automatic_valid"),
       safeElevatorCommandRad: number("safe_elevator_command_deg") * degree,
       safeRudderCommandRad: number("safe_rudder_command_deg") * degree,
@@ -194,6 +229,7 @@ export function interpolatePair(before: FlightFrame, after: FlightFrame, fractio
     return left + difference * fraction;
   };
   return {
+    experiment: fraction < 1 ? before.experiment : after.experiment,
     timeS: scalar(before.timeS, after.timeS),
     // Discrete firmware evidence must never acquire invented fractional sample IDs.
     controlTelemetry: fraction < 1 ? before.controlTelemetry : after.controlTelemetry,
@@ -234,4 +270,20 @@ export function interpolatePair(before: FlightFrame, after: FlightFrame, fractio
     ),
     surfaceContact: fraction < 0.5 ? before.surfaceContact : after.surfaceContact,
   };
+}
+
+export function parseCsvOutcome(text: string): SessionOutcome {
+  const line = text.replace(/^\uFEFF/, "").split(/\r?\n/).find(value => value.startsWith("# birdman-session "));
+  if (!line) return { tag: "unknown", reason: "Legacy CSV has no session completion evidence" };
+  const value: unknown = JSON.parse(line.slice("# birdman-session ".length));
+  if (!isSessionOutcome(value)) throw new Error("Invalid CSV session outcome");
+  return value;
+}
+
+export function parseCsvIncidents(text: string): SessionIncident[] {
+  const line = text.replace(/^\uFEFF/, "").split(/\r?\n/).find(value => value.startsWith("# birdman-incidents "));
+  if (!line) return [];
+  const value: unknown = JSON.parse(line.slice("# birdman-incidents ".length));
+  if (!Array.isArray(value) || !value.every(isSessionIncident)) throw new Error("Invalid CSV session incidents");
+  return value;
 }

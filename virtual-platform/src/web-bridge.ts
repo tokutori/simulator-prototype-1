@@ -144,10 +144,15 @@ async function step(line: string): Promise<void> {
   const rudderCommandRad = rudder.commandRad;
   // Advance both subsystems with held inputs from the interval start. Never
   // expose future plant observations to firmware executing this interval.
+  const mcuStarted = performance.now();
+  const instructionsBefore = instructions;
   advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs, executeOne, 1_000_000);
+  const mcuProcessingMs = performance.now() - mcuStarted;
   nextFirmwareTickUs += 10_000;
+  const plantStarted = performance.now();
   plant.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
   observation = await readPlant();
+  const plantRoundTripMs = performance.now() - plantStarted;
   updateDevices();
 
   const pilotElevator = record.pilotElevator;
@@ -187,6 +192,9 @@ async function step(line: string): Promise<void> {
     release_mcu_time_us: releaseMcuTimeUs,
     backend: 'rp2040js-actual-uf2',
     emulation: {
+      mcu_processing_ms: mcuProcessingMs,
+      plant_round_trip_ms: plantRoundTripMs,
+      instructions: instructions - instructionsBefore,
       processing_ms: processingMs,
       processing_average_ms: processingAverageMs,
       real_time_ratio: realTimeRatio,

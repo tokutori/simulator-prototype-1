@@ -8,6 +8,13 @@ high-alpha model**です。実在機の公式諸元、公開simulatorの推定�
 datasheetを区別して追跡します。実機挙動、飛距離、stall safetyを予測するflight-test
 同定modelではありません。
 
+現行の修正状況・検証結果と未検証境界は
+[全体レビューの追跡記録](docs/full-review-followup.md)を参照してください。
+機体入力はschema 0.12（対地／対気発進速度、空力の座標系、CGモーメント基準を明示）です。
+電装の対応範囲は[BNO055取付契約](docs/bno055-frame-contract.md)、
+[UART送信契約](docs/uart-recorder-contract.md)、
+[記録・終了理由の契約](docs/experiment-recording.md)に分けて記載しています。
+
 ## 実装済み
 
 - body Forward-Right-Down（FRD）、navigation North-East-Down（NED）、SI units

@@ -27,5 +27,14 @@ assert.equal(result, 0, 'actual-UF2 long-duration run must complete');
 const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
 assert.ok(summary.simulated_s >= 119.99, 'must reach 120s, not early water contact');
 assert.ok(summary.instructions > 100_000_000, 'must exceed the removed lifetime cap');
+assert.equal(summary.timing_acceleration, 1, 'capacity cannot be obtained by accelerating the virtual clock');
+assert.ok(summary.control_updates_observed >= 11999, 'firmware must remain active through the entire run');
+assert.equal(summary.deadline_miss_activation_count, 0);
+assert.equal(summary.failsafe_activation_count, 0);
+assert.equal(summary.invalid_sample_duration_s, 0);
+const rows = readFileSync(resolve(folder, 'flight.csv'), 'utf8').trim().split(/\r?\n/);
+assert.equal(rows.length, 12001, 'all 12000 plant updates must be retained, plus header');
+const final = rows[rows.length - 1]?.split(',');
+assert.ok(final && Number(final[1]) >= 1000, 'capacity fixture must record beyond 1 km');
 console.log(JSON.stringify({ passed: true, simulated_s: summary.simulated_s, instructions: summary.instructions,
   scope: 'actual-UF2 runtime capacity only; deliberately non-Birdman launch height' }));

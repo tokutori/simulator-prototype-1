@@ -5,7 +5,7 @@ IDはrepository内で一意とし、完了条件が満たされるまで`done`�
 | ID | Status | Work | Completion criteria |
 | --- | --- | --- | --- |
 | SIM-001 | done | no_std rigid 6DoF core | unit test、RK4、quaternion、FRD/NED contract |
-| SIM-002 | done | JSON aircraft contract v0.10 | strict parse、model validation、schema、sample status、table外policy、environment/controller/failsafe/degraded-air-data/command-conditioning/独立sensor-clock profile |
+| SIM-002 | done | JSON aircraft contract v0.12 | strict parse、model validation、schema、sample status、table外policy、environment/controller/failsafe/degraded-air-data/command-conditioning/独立sensor-clock profile、明示的な発進速度frame・空力basis・CG基準 |
 | SIM-003 | done | servo/sensor/native closed loop | rate/lag/limit test、CSV smoke run |
 | SIM-004 | done | steady-glide trim、4-state longitudinal linearization、host固有値解析 | trim residual test、QX-18 mode regression、PNG/CSV report |
 | SIM-005 | implemented | JSBSim independent comparison | 同一dataset/inputの5秒replay差をreport |

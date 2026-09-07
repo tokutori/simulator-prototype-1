@@ -82,3 +82,13 @@ the explicit frozen-process liveness test. The launch platform also occupies
 much of the early chase view in captured images; evaluate camera occlusion
 handling before considering the visual review closed. Physical model/HIL
 limitations remain as stated above.
+
+### Schema 0.12 duration gate
+
+The rerun of `virtual-platform/src/long-run-check.ts` passed at the current
+UF2/model/plant versions: 120s, 12000 control updates, 470877919 executed
+instructions, zero deadline misses/failsafe activations/invalid sensor duration.
+The CSV retains exactly 12000 data rows and the fixture passes 1000m north.
+This is a high-altitude runtime-capacity fixture, not a Birdman range prediction.
+The gate now asserts those properties as well as duration and the old lifetime
+instruction-cap regression. Generated evidence is under `target/runtime-capacity`.

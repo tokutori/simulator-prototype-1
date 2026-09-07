@@ -62,9 +62,10 @@ initialization. Only a completed control iteration feeds it. The selected 40 ms
 prototype budget exceeds the nominal 10 ms control period and initial 20 ms
 settling wait; actual worst-case latency still requires hardware measurement.
 
-On physical watchdog reboot the firmware inhibits automatic rearming and commands
-the declared failsafe outputs. This does not establish that those outputs make
-every flight condition safe, nor validate servo behaviour during reset.
+On physical watchdog reboot the firmware inhibits automatic rearming before GPIO
+initialization and emits no servo pulses; power-cycle/manual recovery is required.
+This does not command a failsafe angle or establish a safe aircraft state. Servo
+position during reset and after signal loss remains a physical validation requirement.
 
 rp2040js implements the actual watchdog timer but its default reset callback only
 logs a warning. Both adapters install a callback that explicitly aborts the

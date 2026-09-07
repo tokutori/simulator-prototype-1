@@ -70,12 +70,14 @@ cargo build -p sim-cli --bin plant-bridge
 npm.cmd install --prefix virtual-platform
 npm.cmd run check --prefix virtual-platform
 npm.cmd run simulate --prefix virtual-platform -- `
-  --steps 2000 --timing-acceleration 50 --output reports\virtual-platform.csv
+  --steps 2000 --timing-acceleration 1 --output reports\virtual-platform.csv
 ```
 
 firmwareは10 ms固定周期を目標に実センサ互換I²C transactionを行い、KRS-4034HVの許容範囲内にある
-20 ms周期・1000～2000 usのPWMを出す。50倍加速は10～500倍sweepで論理100 Hzを維持した最大値だが、
-deadline、jitter、CPU使用率のvalidationには使わない。
+20 ms周期・1000～2000 usのPWMを出す。通常実行はCPU時間倍率1固定（batchも既定1）。
+倍率変更はCPUと周辺機器の時間関係を変えるため、任意の高速化ではなく明示的な負荷実験である。
+実時間に追いつかないPCではWeb画面に警告する。倍率1でも実機のcycle精度を保証しない。
+最新の境界・修正・検証状況は[全体レビュー修正記録](docs/review-remediation.md)を参照。
 
 CSVを標準出力へ出す場合:
 

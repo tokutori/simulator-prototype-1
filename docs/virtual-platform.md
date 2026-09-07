@@ -50,9 +50,9 @@ KRS-4034HV公式manualのPWM許容はcycle 3～30 ms、normal pulse 700～2300 u
 `rp2040js`はRP2040 boot ROMのintrinsic tableを提供しないため、firmwareは
 `rp2040-hal/disable-intrinsics`でportable compiler routinesを使用する。実機互換buildで
 あり、simulation専用logicではない。firmwareは1 MHz timerで処理時間を差し引いて10 ms周期を
-作り、超過時はGPIO20をhighにする。加速率10/20/50/100/200/500を3秒runで比較すると、
-10～50倍は302 update・deadline miss 0だったが、100/200/500倍は241/121/51 updateへ崩れた。
-defaultを50倍へ下げた。ただしこれはcycle accuracyの証拠ではなく、summaryは常に
+作り、超過時はGPIO20をhighにする。2026-09-08以降、defaultは1倍とする。
+過去の50倍sweepは旧firmwareの履歴であり、現行UART記録付きfirmwareの周期保証には使用しない。
+倍率はCPUと周辺機器の時間関係を変えるため、通常のwall-clock高速化とは異なる。summaryは常に
 `timing_validated=false`を返す。
 
 物理MCUをPCへ接続するHILでは、同じplant bridgeの外側adapterだけを交換し、少なくとも
@@ -115,8 +115,8 @@ plotは`reports/degraded-airspeed-early-robustness.png`。
 DPS310公式datasheetの`MEAS_CFG.PRS_RDY`は新pressure resultを示し、pressure register readで
 clearされる。virtual deviceは32 Hzでbitを生成し、pressure 3 byte readでclearする。firmwareは
 bitが0の100 Hz周期で直前pressureを最大20 read保持し、それを超えると異常にする。controllerも
-32 Hzのbarometric値が変化した時だけ鉛直速度を更新し、同一sampleの100 Hz反復をゼロ速度として
-混ぜない。40 updateの`dps-stale`固定試験は開始0.23 s後にfailsafeへ入り、再初期化2回、
+barometric取得sequence・取得時刻で更新を識別し、新しい同値sampleはゼロ速度へ収束させる。
+欠測期間も取得時刻差に含め、保持値を新測定として混ぜない。旧40 updateの`dps-stale`固定試験は開始0.23 s後にfailsafeへ入り、再初期化2回、
 raw invalid 0.30 s、failsafe/arming 0.47 sを経て20 valid updateで復帰した。
 
 ## Datasheets

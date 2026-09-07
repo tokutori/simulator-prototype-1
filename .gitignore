@@ -13,6 +13,8 @@
 /**/node_modules/
 /virtual-platform/dist/
 /visualizer-web/dist/
+/visualizer-web/test-results/
+/visualizer-web/playwright-report/
 
 # Embedded firmware binaries
 *.elf

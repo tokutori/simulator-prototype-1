@@ -14,5 +14,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "server.ts", "scripts"]
+  "include": ["src", "server.ts", "scripts", "e2e", "playwright.config.ts"]
 }

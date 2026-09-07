@@ -8,6 +8,7 @@
     "build:platform": "tsx scripts/build-platform.ts",
     "check": "tsc --noEmit",
     "test": "tsx --test src/*.test.ts",
+    "test:e2e": "playwright test",
     "sample": "tsx scripts/build-sample.ts",
     "smoke:live": "tsx scripts/smoke-live.ts",
     "dev": "npm run build:platform && tsx server.ts",
@@ -19,6 +20,7 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@types/node": "24.3.0",
     "@types/three": "0.185.4",
     "@types/ws": "8.18.1",

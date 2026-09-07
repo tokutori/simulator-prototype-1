@@ -1,51 +1,43 @@
-import { interpolatePair } from "./replay.ts";
+import { interpolateFrame } from "./replay.ts";
 import type { FlightFrame } from "./types.ts";
+
+/** Monotonic presentation clock. Never jumps to a late packet or extrapolates physics.
+ * Runs at measured producer speed; CPU slowdown remains visible in the separate status.
+ */
+export class LivePlayback {
+  private samples: ReceivedFlightFrame[] = [];
+  private cursorS: number | undefined;
+  private previousWallMs: number | undefined;
+  private rate = 1;
+
+  push(frame: FlightFrame, receivedAtMs: number): void {
+    const previous = this.samples.at(-1);
+    if (previous && frame.timeS > previous.frame.timeS && receivedAtMs > previous.receivedAtMs) {
+      const measured = Math.min(1, (frame.timeS - previous.frame.timeS) * 1000 / (receivedAtMs - previous.receivedAtMs));
+      this.rate = this.samples.length < 3 ? measured : this.rate * 0.8 + measured * 0.2;
+    }
+    this.samples.push({ frame, receivedAtMs });
+    this.cursorS ??= frame.timeS;
+  }
+
+  frame(nowMs: number): FlightFrame | undefined {
+    const first = this.samples[0];
+    const last = this.samples.at(-1);
+    const elapsed = this.previousWallMs === undefined ? 0 : Math.max(0, Math.min(50, nowMs - this.previousWallMs)) / 1000;
+    this.previousWallMs = nowMs;
+    if (!first || !last || this.cursorS === undefined) return undefined;
+    // Prime a two-interval buffer before starting. Under-runs hold, never invent a future pose.
+    if (this.samples.length >= 3 || this.cursorS > first.frame.timeS) {
+      this.cursorS = Math.min(last.frame.timeS, this.cursorS + elapsed * this.rate);
+    }
+    const result = interpolateFrame(this.samples.map(sample => sample.frame), this.cursorS);
+    while (this.samples.length > 3 && this.samples[1]!.frame.timeS < this.cursorS) this.samples.shift();
+    return result;
+  }
+}
 
 /** One plant frame annotated at the browser adapter boundary. */
 export interface ReceivedFlightFrame {
   frame: FlightFrame;
   receivedAtMs: number;
-}
-
-/**
- * Produces a continuous presentation frame from irregular WebSocket arrivals.
- *
- * This adapter never feeds the interpolated value back to the MCU or plant.
- * Control and logging retain the original 100 Hz samples.
- */
-export function frameAtReceiptTime(
-  samples: readonly ReceivedFlightFrame[],
-  presentationTimeMs: number,
-): FlightFrame | undefined {
-  const first = samples[0];
-  const last = samples.at(-1);
-  if (!first || !last) return undefined;
-  if (presentationTimeMs <= first.receivedAtMs) return first.frame;
-  if (presentationTimeMs >= last.receivedAtMs) return last.frame;
-
-  let low = 0;
-  let high = samples.length - 1;
-  while (low + 1 < high) {
-    const middle = Math.floor((low + high) / 2);
-    const sample = samples[middle];
-    if (sample && sample.receivedAtMs <= presentationTimeMs) low = middle;
-    else high = middle;
-  }
-  const before = samples[low];
-  const after = samples[high];
-  if (!before || !after) return last.frame;
-  const intervalMs = after.receivedAtMs - before.receivedAtMs;
-  if (intervalMs <= 0) return after.frame;
-  const fraction = (presentationTimeMs - before.receivedAtMs) / intervalMs;
-  return interpolatePair(before.frame, after.frame, fraction);
-}
-
-/** Keeps only the short visual jitter buffer; the full-resolution flight log is separate. */
-export function trimReceiptBuffer(
-  samples: ReceivedFlightFrame[],
-  presentationTimeMs: number,
-): void {
-  while (samples.length > 2 && (samples[1]?.receivedAtMs ?? Infinity) < presentationTimeMs) {
-    samples.shift();
-  }
 }

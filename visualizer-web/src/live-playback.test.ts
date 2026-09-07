@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { frameAtReceiptTime, trimReceiptBuffer, type ReceivedFlightFrame } from "./live-playback.ts";
+import { LivePlayback } from "./live-playback.ts";
 import type { FlightFrame } from "./types.ts";
 
 const frame = (timeS: number, northM: number): FlightFrame => ({
@@ -30,27 +30,25 @@ const frame = (timeS: number, northM: number): FlightFrame => ({
   surfaceContact: false,
 });
 
-test("receipt-time playback interpolates irregular live arrivals", () => {
-  const samples: ReceivedFlightFrame[] = [
-    { frame: frame(0, 0), receivedAtMs: 100 },
-    { frame: frame(0.01, 1), receivedAtMs: 112 },
-    { frame: frame(0.02, 2), receivedAtMs: 130 },
-  ];
-
-  const between = frameAtReceiptTime(samples, 121);
-  assert.ok(between);
-  assert.equal(between.timeS, 0.015);
-  assert.equal(between.northM, 1.5);
+test("slow producer arrivals cannot teleport the presentation clock", () => {
+  const playback = new LivePlayback();
+  let previous = 0;
+  for (let now = 0; now <= 400; now++) {
+    if (now % 80 === 0) playback.push(frame(now / 8000, now / 800), now);
+    const position = playback.frame(now)!.northM;
+    assert.ok(position >= previous);
+    assert.ok(position - previous <= 0.0013, `jump at ${now}: ${position - previous}`);
+    assert.ok(position <= Math.floor(now / 80) * 0.1 + 1e-12);
+    previous = position;
+  }
 });
 
-test("receipt buffer preserves a bracketing pair", () => {
-  const samples: ReceivedFlightFrame[] = [
-    { frame: frame(0, 0), receivedAtMs: 100 },
-    { frame: frame(0.01, 1), receivedAtMs: 110 },
-    { frame: frame(0.02, 2), receivedAtMs: 120 },
-    { frame: frame(0.03, 3), receivedAtMs: 130 },
-  ];
-
-  trimReceiptBuffer(samples, 125);
-  assert.deepEqual(samples.map((sample) => sample.receivedAtMs), [120, 130]);
+test("long stalls hold real evidence and eventual terminal pose is reached", () => {
+  const playback = new LivePlayback();
+  for (let i = 0; i < 4; i++) playback.push(frame(i * 0.01, i * 0.1), i * 10);
+  playback.frame(30);
+  const before = playback.frame(1000)!;
+  assert.ok(before.timeS <= 0.03);
+  for (let now = 1010; now <= 2000; now += 10) playback.frame(now);
+  assert.equal(playback.frame(2010)!.timeS, 0.03);
 });

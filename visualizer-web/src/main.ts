@@ -32,6 +32,7 @@ import {
   type Effect,
 } from "./app-state.ts";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
+import { ChaseCamera } from "./chase-camera.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
 import { createDistanceRings } from "./distance-rings.ts";
 import { classifyFlightPhase, formatFlightTime, type FlightPhase } from "./flight-phase.ts";
@@ -42,11 +43,7 @@ import {
   type AxisBinding,
   type InputSettings,
 } from "./input.ts";
-import {
-  frameAtReceiptTime,
-  trimReceiptBuffer,
-  type ReceivedFlightFrame,
-} from "./live-playback.ts";
+import { LivePlayback } from "./live-playback.ts";
 import { frameFromLive, interpolateFrame, parseFlightCsv } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
 import type {
@@ -65,7 +62,6 @@ import {
 } from "./xr-state.ts";
 
 const settingsKey = "birdman-visualizer-input-v1";
-const livePresentationDelayMs = 30;
 const radiansToDegrees = 180 / Math.PI;
 const canvas = element<HTMLCanvasElement>("flight-view");
 applyUiScale(window.innerWidth, window.innerHeight);
@@ -95,14 +91,14 @@ let replayFrames: FlightFrame[] = [];
 let replayName = "sample-flight.csv";
 let liveFrames: FlightFrame[] = [];
 let liveFrame: FlightFrame | undefined;
-let liveReceiptBuffer: ReceivedFlightFrame[] = [];
+let livePlayback = new LivePlayback();
 let playbackTimeS = 0;
 let replayPlaying = true;
 let playbackSpeed = 1;
 let previousAnimationMs = performance.now();
 let lastCommandSentMs = 0;
 let socket: WebSocket | undefined;
-let chaseInitialized = false;
+const chaseCamera = new ChaseCamera();
 let trajectory: Line | undefined;
 let settings = loadSettings();
 const pilotInput = new PilotInput(settings);
@@ -117,6 +113,14 @@ runEffect({ type: "connect-mcu", sessionId: appState.sessionId });
 void loadDefaultReplay(false);
 renderer.setAnimationLoop(animate);
 window.addEventListener("resize", resize);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  // A hidden tab is a presentation discontinuity, not a backlog to replay while flying.
+  previousAnimationMs = performance.now();
+  chaseCamera.reset();
+  livePlayback = new LivePlayback();
+  if (liveFrame) livePlayback.push(liveFrame, previousAnimationMs);
+});
 resize();
 
 function animate(nowMs: number): void {
@@ -156,9 +160,7 @@ function animate(nowMs: number): void {
     frame = interpolateFrame(replayFrames, playbackTimeS);
     updateTimeline();
   } else if (isInteractive(appState)) {
-    const presentationTimeMs = nowMs - livePresentationDelayMs;
-    frame = frameAtReceiptTime(liveReceiptBuffer, presentationTimeMs) ?? liveFrame;
-    trimReceiptBuffer(liveReceiptBuffer, presentationTimeMs);
+    frame = livePlayback.frame(nowMs) ?? liveFrame;
   }
 
   if (frame) {
@@ -186,22 +188,9 @@ function displayFrame(frame: FlightFrame, deltaS: number): void {
     camera.updateProjectionMatrix();
   } else {
     resetXrRig(xrRig);
-    const forward = new Vector3(0, 0, -1).applyQuaternion(attitude);
-    const horizontalForward = new Vector3(forward.x, 0, forward.z);
-    if (horizontalForward.lengthSq() < 1e-8) {
-      horizontalForward.set(0, 0, -1);
-    } else {
-      horizontalForward.normalize();
-    }
-    const desired = position.clone().addScaledVector(horizontalForward, -19).add(new Vector3(0, 6, 0));
-    if (!chaseInitialized) {
-      camera.position.copy(desired);
-      chaseInitialized = true;
-    } else {
-      const smoothing = 1 - Math.exp(-Math.max(deltaS, 1 / 120) * 4.5);
-      camera.position.lerp(desired, smoothing);
-    }
-    camera.lookAt(position.clone().addScaledVector(horizontalForward, 4));
+    const pose = chaseCamera.update(position, attitude, deltaS);
+    camera.position.copy(pose.eye);
+    camera.lookAt(pose.target);
     camera.fov = 55;
     camera.updateProjectionMatrix();
   }
@@ -335,6 +324,7 @@ function bindControls(): void {
     replayPlaying = !replayPlaying;
     if (replayPlaying && playbackTimeS >= (replayFrames.at(-1)?.timeS ?? 0)) {
       playbackTimeS = replayFrames[0]?.timeS ?? 0;
+      chaseCamera.reset();
     }
     updatePlayButton();
   });
@@ -344,6 +334,7 @@ function bindControls(): void {
     const last = replayFrames.at(-1);
     if (first && last) {
       playbackTimeS = first.timeS + Number(target.value) * (last.timeS - first.timeS);
+      chaseCamera.reset();
     }
   });
   element<HTMLSelectElement>("playback-speed").addEventListener("change", (event) => {
@@ -449,6 +440,7 @@ function loadReplay(frames: FlightFrame[], name: string, selectMode = true): voi
   updatePlayButton();
   buildTrajectory(frames);
   if (selectMode) {
+    chaseCamera.reset();
     element<HTMLButtonElement>("open-analysis").disabled = frames.length < 2;
     dispatch({ type: "select-replay", sourceName: name });
     hideMessage();
@@ -471,6 +463,7 @@ function buildTrajectory(frames: readonly FlightFrame[]): void {
 }
 
 function setMode(next: "replay" | "live"): void {
+  chaseCamera.reset();
   if (next === "live") dispatch({ type: "request-mcu" });
   else {
     element<HTMLButtonElement>("open-analysis").disabled = replayFrames.length < 2;
@@ -514,7 +507,8 @@ function connectLive(sessionId: number): void {
   disconnectLive();
   liveFrame = undefined;
   liveFrames = [];
-  liveReceiptBuffer = [];
+  livePlayback = new LivePlayback();
+  chaseCamera.reset();
   pilotInput.clear();
   element<HTMLButtonElement>("download-live").disabled = true;
   element<HTMLButtonElement>("open-analysis").disabled = true;
@@ -559,7 +553,7 @@ function connectLive(sessionId: number): void {
       });
       liveFrame = nextFrame;
       liveFrames.push(liveFrame);
-      liveReceiptBuffer.push({ frame: liveFrame, receivedAtMs: performance.now() });
+      livePlayback.push(liveFrame, performance.now());
       element<HTMLButtonElement>("download-live").disabled = liveFrames.length < 2;
       element<HTMLButtonElement>("open-analysis").disabled = liveFrames.length < 2;
     } catch (error) {
@@ -592,7 +586,7 @@ function disconnectLive(): void {
 function setCameraMode(next: CameraMode): void {
   if (renderer.xr.isPresenting && next !== "cockpit") return;
   cameraMode = next;
-  chaseInitialized = false;
+  chaseCamera.reset();
   element<HTMLButtonElement>("cockpit-camera").setAttribute("aria-pressed", String(next === "cockpit"));
   element<HTMLButtonElement>("chase-camera").setAttribute("aria-pressed", String(next === "chase"));
   if (trajectory) trajectory.visible = !isInteractive(appState) && next === "chase";
@@ -849,7 +843,10 @@ function value(id: string, numeric: number, digits: number): void {
 }
 
 function isFormTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLButtonElement;
+  // Ordinary buttons must not steal flight keys after Restart/Interactive clicks.
+  // Editable controls retain their native keyboard interaction.
+  return target instanceof HTMLInputElement || target instanceof HTMLSelectElement
+    || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
 }
 
 function isControlCode(code: string): boolean {

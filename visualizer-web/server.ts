@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import { createServer as createViteServer } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
 import { ResponseDeadline } from './src/response-deadline';
+import { allowLiveAccess } from './src/live-access';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -48,6 +49,14 @@ httpServer.on("upgrade", (request, socket, head) => {
   if (['vite-hmr', 'vite-ping'].includes(String(request.headers['sec-websocket-protocol']))) return;
   if (request.url !== "/live") {
     socket.destroy();
+    return;
+  }
+  if (!allowLiveAccess(request.headers.host, request.headers.origin, port)) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    return;
+  }
+  if (webSockets.clients.size >= 4) {
+    socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
     return;
   }
   webSockets.handleUpgrade(request, socket, head, (webSocket) => {
@@ -185,7 +194,7 @@ webSockets.on("connection", (webSocket) => {
   };
   const startupTimer = setTimeout(() => {
     sendJson(webSocket, { type: "error", message: "actual UF2 did not arm in rp2040js within 15 seconds" });
-    bridge?.kill();
+    if (bridge) terminateBridge(bridge);
   }, 15_000);
 
   // This timer lives outside the CPU-emulation/plant process: a blocked plant
@@ -196,7 +205,7 @@ webSockets.on("connection", (webSocket) => {
     cancelStep();
     clearInterval(responseMonitor);
     sendJson(webSocket, { type: 'error', message: 'actual-UF2 bridge response timed out after 5 seconds (wall clock)' });
-    bridge?.kill();
+    if (bridge) terminateBridge(bridge);
   }, 250);
 
   webSocket.on("close", () => {
@@ -205,7 +214,7 @@ webSockets.on("connection", (webSocket) => {
     clearTimeout(startupTimer);
     lines.close();
     if (bridge && bridge.exitCode === null) {
-      bridge.kill();
+      terminateBridge(bridge);
     }
   });
 });
@@ -225,5 +234,27 @@ function isInputKind(value: unknown): value is PilotCommand["elevator_input_kind
 function sendJson(webSocket: WebSocket, value: unknown): void {
   if (webSocket.readyState === WebSocket.OPEN) {
     webSocket.send(JSON.stringify(value));
+  }
+}
+
+/** The bridge owns a plant child. On Windows, killing only its parent can
+ * leave a wedged plant alive; terminate this known spawned subtree as a unit.
+ */
+function terminateBridge(child: ChildProcessWithoutNullStreams): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const pid = child.pid;
+  if (process.platform === 'win32' && typeof pid === 'number') {
+    const cleanup = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'],
+      { windowsHide: true, stdio: 'ignore' });
+    cleanup.on('error', error => {
+      process.stderr.write(`failed to terminate simulator process tree: ${String(error)}\n`);
+      child.kill();
+    });
+  } else {
+    // Cooperative EOF lets the bridge close its plant, with an upper bound if
+    // the bridge itself is stuck. The plant also has a four-second read bound.
+    child.stdin.end();
+    const timeout = setTimeout(() => child.kill(), 5000);
+    child.once('exit', () => clearTimeout(timeout));
   }
 }

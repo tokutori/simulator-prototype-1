@@ -16,6 +16,8 @@ export type ControlTelemetry = { tag: "unavailable" } | {
   runIdentity: RunIdentity;
   sequence: number;
   timeUs: number;
+  releaseMcuTimeUs: number;
+  plantIntervalStartS: number;
   automaticValid: boolean;
   safeElevatorCommandRad: number;
   safeRudderCommandRad: number;
@@ -55,6 +57,8 @@ export interface InteractiveObservation {
   run_identity: RunIdentity;
   firmware_sequence: number;
   firmware_time_us: number;
+  release_mcu_time_us: number;
+  plant_interval_start_s: number;
   automatic_valid: boolean;
   safe_elevator_command_rad: number;
   safe_rudder_command_rad: number;

@@ -790,6 +790,7 @@ function downloadLiveLog(): void {
     "observed_elevator_command_deg", "observed_rudder_command_deg",
     "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
     "safe_rudder_command_deg", "uf2_sha256", "model_sha256", "plant_sha256",
+    "release_mcu_time_us", "plant_interval_start_s",
   ];
   const rows = liveFrames.map((frame) => [
     frame.timeS, frame.northM, frame.eastM, frame.altitudeM,
@@ -812,7 +813,8 @@ function downloadLiveLog(): void {
       frame.controlTelemetry.safeRudderCommandRad * radiansToDegrees,
       frame.controlTelemetry.runIdentity.uf2_sha256, frame.controlTelemetry.runIdentity.model_sha256,
       frame.controlTelemetry.runIdentity.plant_sha256,
-    ] : Array.from({ length: 12 }, () => "")),
+      frame.controlTelemetry.releaseMcuTimeUs, frame.controlTelemetry.plantIntervalStartS,
+    ] : Array.from({ length: 14 }, () => "")),
   ].join(","));
   const blob = new Blob([[header.join(","), ...rows].join("\n") + "\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

@@ -37,6 +37,7 @@ test("live JSON without firmware evidence is rejected instead of plotted as real
 test("live boundary requires unscaled CPU and carries reproducible binary identity", () => {
   const observation: InteractiveObservation = {
     firmware_sequence: 1, firmware_time_us: 1_000_000, automatic_valid: true,
+    release_mcu_time_us: 995000, plant_interval_start_s: 0,
     run_identity: { uf2_sha256: "a".repeat(64), model_sha256: "b".repeat(64), plant_sha256: "c".repeat(64) },
     safe_elevator_command_rad: 0, safe_rudder_command_rad: 0.03,
     observed_elevator_command_rad: 0, observed_rudder_command_rad: 0,
@@ -55,6 +56,8 @@ test("live boundary requires unscaled CPU and carries reproducible binary identi
   if (result.tag === "firmware") {
     assert.deepEqual(result.runIdentity, observation.run_identity);
     assert.equal(result.safeRudderCommandRad, 0.03);
+    assert.equal(result.releaseMcuTimeUs, 995000);
+    assert.equal(result.plantIntervalStartS, 0);
   }
   assert.throws(() => frameFromLive({ ...observation, emulation: { ...observation.emulation, timing_acceleration: 50 } } as unknown as InteractiveObservation), /scaled CPU/);
   assert.throws(() => frameFromLive({ ...observation, run_identity: { ...observation.run_identity, uf2_sha256: "bad" } }), /run identity/);

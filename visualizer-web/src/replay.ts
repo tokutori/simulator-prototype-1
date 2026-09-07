@@ -46,6 +46,7 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
     "mixed_elevator_command_rad", "mixed_rudder_command_rad", "firmware_sequence", "firmware_time_us",
     "safe_elevator_command_rad", "safe_rudder_command_rad", "observed_elevator_command_rad", "observed_rudder_command_rad",
     "elevator_pwm_sample_time_us", "rudder_pwm_sample_time_us",
+    "release_mcu_time_us", "plant_interval_start_s",
   ];
   if (numericFields.some(key => typeof observation[key] !== "number" || !Number.isFinite(observation[key]))
       || typeof observation.automatic_valid !== "boolean" || typeof observation.surface_contact !== "boolean") {
@@ -59,6 +60,8 @@ export function frameFromLive(observation: InteractiveObservation): FlightFrame 
     controlTelemetry: { tag: "firmware", sequence: observation.firmware_sequence,
       runIdentity: observation.run_identity,
       timeUs: observation.firmware_time_us, automaticValid: observation.automatic_valid,
+      releaseMcuTimeUs: observation.release_mcu_time_us,
+      plantIntervalStartS: observation.plant_interval_start_s,
       safeElevatorCommandRad: observation.safe_elevator_command_rad,
       safeRudderCommandRad: observation.safe_rudder_command_rad,
       observedElevatorCommandRad: observation.observed_elevator_command_rad,
@@ -147,6 +150,7 @@ function rowToFrame(row: Map<string, string>, lineNumber: number): FlightFrame {
     timeS: number("time_s"),
     controlTelemetry: row.get("firmware_sequence") ? {
       tag: "firmware", sequence: number("firmware_sequence"), timeUs: number("firmware_time_us"),
+      releaseMcuTimeUs: number("release_mcu_time_us"), plantIntervalStartS: number("plant_interval_start_s"),
       runIdentity: { uf2_sha256: identity.uf2_sha256 ?? "", model_sha256: identity.model_sha256 ?? "", plant_sha256: identity.plant_sha256 ?? "" },
       automaticValid: boolean("automatic_valid"),
       safeElevatorCommandRad: number("safe_elevator_command_deg") * degree,

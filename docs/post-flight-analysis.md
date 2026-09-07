@@ -40,3 +40,8 @@ PWM指令とその受信時刻を保持します。automatic_valid=falseの区�
 計測境界は異なります。PWM receivedは出力ピン上の有効なパルスから得た指令であり、
 Mixed commandはfirmwareのソフトウェア指令、Actualはサーボ動特性を経た模擬舵角です。
 これらの差は即座に制御不良を意味しません。CSV内の時刻と更新周期を合わせて比較してください。
+
+`release_mcu_time_us`はpreflight終了時のMCU時計で、機体時刻0秒への対応点です。
+MCU/PWM絶対時刻からこれを引いて秒へ換算すると機体時計と比較できます。
+`plant_interval_start_s`は、その行に記録した指令を与えた積分区間の開始時刻で、
+`time_s`は区間末尾の機体状態時刻です。両者を同時刻の応答とみなさないでください。

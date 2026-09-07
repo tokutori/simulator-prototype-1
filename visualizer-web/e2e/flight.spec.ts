@@ -25,12 +25,15 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   const frames: Record<string, unknown>[] = [];
   page.on('websocket', socket => socket.on('framereceived', event => {
     const data = JSON.parse(String(event.payload));
+    if (data.type === 'error') console.error('MCU bridge diagnostic:', data.message);
     if (data.backend === 'rp2040js-actual-uf2') frames.push(data);
   }));
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto('/');
   await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
   await expect(page.locator('#open-analysis')).toBeEnabled();
+  await expect(page.locator('#replay-controls')).toBeHidden();
+  await expect(page.locator('#live-controls')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('fhd-chase.png') });
   await page.locator('#autonomy').fill('0');
   // Restart keeps a normal button focused; keyboard flight input must still work.
@@ -48,6 +51,7 @@ test('real UF2 live restart, replay isolation and durable analysis tab', async (
   await page.locator('#replay-mode').click();
   await expect(page.locator('#mode-badge')).toHaveText('REPLAY');
   await expect(page.locator('#timeline')).toBeVisible();
+  await expect(page.locator('#live-controls')).toBeHidden();
   await page.locator('#live-mode').click();
   await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
   await expect(page.locator('#open-analysis')).toBeEnabled();

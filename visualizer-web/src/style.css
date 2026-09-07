@@ -8,6 +8,8 @@
 
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+/* Author-level flex/grid declarations must not override TEA's hidden state. */
+[hidden] { display: none !important; }
 button, input, select { font: inherit; }
 button, select, input[type="number"], input[type="text"], .file-control {
   border: 1px solid rgba(214, 235, 232, 0.28);
@@ -30,8 +32,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .top-bar h1 { margin: 0.15rem 0 0; font-size: clamp(1rem, 2vw, 1.35rem); font-weight: 500; letter-spacing: 0.02em; }
 .eyebrow { margin: 0; color: #e6a44c; font: 500 0.68rem/1 ui-monospace, monospace; letter-spacing: 0.14em; }
-.status-cluster { display: flex; align-items: center; gap: 0.65rem; color: #b8cbc8; font-size: 0.78rem; }
-#mcu-performance { color: #d4e8e4; font: 0.68rem/1.2 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.status-cluster { display: flex; flex-wrap: wrap; justify-content: flex-end; width: 35%; align-items: center; gap: 0.35rem 0.65rem; color: #b8cbc8; font-size: 0.78rem; }
+#mcu-performance { flex-basis: 100%; text-align: right; color: #d4e8e4; font: 0.68rem/1.2 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 .mode-badge, .phase-badge { padding: 0.28rem 0.5rem; border: 1px solid rgba(142, 224, 203, 0.48); border-radius: 3px; font: 500 0.68rem/1 ui-monospace, monospace; }
 .mode-badge { color: #8ee0cb; }
 .phase-badge { color: #ffe4a8; border-color: rgba(230, 164, 76, 0.58); }

@@ -22,9 +22,9 @@ export interface PlantObservation {
 
 export interface I2cDevice {
   readonly address: number;
-  startWrite(): void;
-  startRead(): void;
-  writeByte(value: number): void;
+  startWrite(): boolean;
+  startRead(): boolean;
+  writeByte(value: number): boolean;
   readByte(): number;
 }
 
@@ -44,13 +44,14 @@ abstract class RegisterDevice implements I2cDevice {
 
   constructor(readonly address: number) {}
 
-  startWrite(): void {
+  startWrite(): boolean {
     this.expectingPointer = true;
+    return true;
   }
 
-  startRead(): void {}
+  startRead(): boolean { return true; }
 
-  writeByte(value: number): void {
+  writeByte(value: number): boolean {
     if (this.expectingPointer) {
       this.pointer = value & 0xff;
       this.expectingPointer = false;
@@ -58,6 +59,7 @@ abstract class RegisterDevice implements I2cDevice {
       this.writeRegister(this.pointer, value & 0xff);
       this.pointer = (this.pointer + 1) & 0xff;
     }
+    return true;
   }
 
   readByte(): number {
@@ -148,17 +150,32 @@ export class Sdp810Device implements I2cDevice {
   private command: number[] = [];
   private bytes: Uint8Array<ArrayBufferLike> = new Uint8Array(9);
   private readIndex = 0;
+  private state: { kind: 'idle'; readyAtUs: number } | { kind: 'continuous'; readyAtUs: number } = { kind: 'idle', readyAtUs: 0 };
 
-  startWrite(): void {
+  constructor(private readonly nowUs: () => number) {}
+
+  startWrite(): boolean {
     this.command = [];
+    return this.nowUs() >= this.state.readyAtUs || this.state.kind === 'continuous';
   }
 
-  startRead(): void {
+  startRead(): boolean {
     this.readIndex = 0;
+    return this.state.kind === 'continuous' && this.nowUs() >= this.state.readyAtUs;
   }
 
-  writeByte(value: number): void {
+  writeByte(value: number): boolean {
     this.command.push(value & 0xff);
+    if (this.command.length === 1) return true;
+    if (this.command.length !== 2) return false;
+    const command = (this.command[0]! << 8) | this.command[1]!;
+    if (command === 0x3ff9) {
+      this.state = { kind: 'idle', readyAtUs: this.nowUs() + 500 };
+      return true;
+    }
+    if (command !== 0x3615 || this.state.kind !== 'idle' || this.nowUs() < this.state.readyAtUs) return false;
+    this.state = { kind: 'continuous', readyAtUs: this.nowUs() + 8000 };
+    return true;
   }
 
   readByte(): number {
@@ -176,10 +193,11 @@ export class Sdp810Device implements I2cDevice {
 
 export class Dps310Device extends RegisterDevice {
   private readonly registers = new Uint8Array(256);
-  private pressureSampleBucket = -1;
-  private updateCount = 0;
+  private nextPressureUs = 0;
+  private observation: { kind: 'none' } | { kind: 'available'; value: PlantObservation } = { kind: 'none' };
+  private fault: SensorFaultKind = 'none';
 
-  constructor() {
+  constructor(private readonly nowUs: () => number) {
     super(0x77);
     this.registers[0x08] = 0xc0;
     this.registers[0x28] = 0;
@@ -188,14 +206,21 @@ export class Dps310Device extends RegisterDevice {
   }
 
   update(observation: PlantObservation, fault: SensorFaultKind = 'none'): void {
+    this.observation = { kind: 'available', value: observation };
+    this.fault = fault;
+    this.convert();
+  }
+
+  private convert(): void {
+    if (this.observation.kind === 'none') return;
+    const observation = this.observation.value;
+    const fault = this.fault;
     const density = 1.164;
     const gravity = 9.80665;
     const pressurePa = 100_000 + density * gravity * (10.5 - observation.sensor_barometric_altitude_m);
     const scaled = (pressurePa - 100_000) / 10_000;
     const raw = clampI24(Math.round(scaled * 524_288));
     const mode = (this.registers[0x08] ?? 0) & 0x07;
-    const sampleBucket = Math.floor(this.updateCount * 32 / 100);
-    this.updateCount += 1;
     if (fault === 'dps-not-ready') {
       this.registers[0x08] = mode;
       return;
@@ -204,16 +229,20 @@ export class Dps310Device extends RegisterDevice {
       this.registers[0x08] = 0xc0 | mode;
       return;
     }
-    putI24Be(this.registers, 0x00, raw);
-    putI24Be(this.registers, 0x03, 0);
-    const pressureReady = sampleBucket !== this.pressureSampleBucket
-      ? 0x10
-      : (this.registers[0x08] ?? 0) & 0x10;
-    this.pressureSampleBucket = sampleBucket;
+    let pressureReady = (this.registers[0x08] ?? 0) & 0x10;
+    if ((mode === 5 || mode === 7) && this.nowUs() >= this.nextPressureUs) {
+      const rate = 2 ** (((this.registers[0x06] ?? 0) >>> 4) & 7);
+      const periodUs = 1e6 / rate;
+      this.nextPressureUs += (Math.floor((this.nowUs() - this.nextPressureUs) / periodUs) + 1) * periodUs;
+      putI24Be(this.registers, 0x00, raw);
+      putI24Be(this.registers, 0x03, 0);
+      pressureReady = 0x10;
+    }
     this.registers[0x08] = 0xc0 | pressureReady | mode;
   }
 
   protected readRegister(register: number): number {
+    if (register === 0x08 || register === 0x00) this.convert();
     const value = this.registers[register] ?? 0xff;
     if (register === 0x02) this.registers[0x08] = (this.registers[0x08] ?? 0) & ~0x10;
     return value;
@@ -221,7 +250,9 @@ export class Dps310Device extends RegisterDevice {
 
   protected writeRegister(register: number, value: number): void {
     if (register === 0x08) {
-      this.registers[register] = ((this.registers[register] ?? 0) & 0xf0) | (value & 0x07);
+      this.registers[register] = ((this.registers[register] ?? 0) & 0xc0) | (value & 0x07);
+      const rate = 2 ** (((this.registers[0x06] ?? 0) >>> 4) & 7);
+      this.nextPressureUs = this.nowUs() + 1e6 / rate;
     } else {
       this.registers[register] = value;
     }

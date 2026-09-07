@@ -15,6 +15,7 @@ import {
   type SensorFaultKind,
 } from './devices.js';
 import { loadUf2 } from './uf2.js';
+import { attachServoPwm } from './servo-pwm.js';
 
 const commandLine = process.argv.slice(2);
 if (commandLine.includes('--help') || commandLine.includes('-h')) {
@@ -74,8 +75,8 @@ async function main(): Promise<void> {
 
   const bno = new Bno055Device();
   const angle = new As5600Device();
-  const sdp = new Sdp810Device();
-  const dps = new Dps310Device();
+  const sdp = new Sdp810Device(() => simulator.clock.micros);
+  const dps = new Dps310Device(() => simulator.clock.micros);
   const devices = new Map<number, I2cDevice>([bno, angle, sdp, dps].map(device => [device.address, device]));
   let faultUpdatesInjected = 0;
   let updateFaultActive = false;
@@ -109,17 +110,14 @@ async function main(): Promise<void> {
       && address === sdp.address
       && (activeSensorFault() === 'sdp-nack' || updateFaultActive);
     connected = sdpNack ? undefined : devices.get(address);
-    if (connected) {
-      if (mode === I2CMode.Write) connected.startWrite();
-      else connected.startRead();
-    }
-    i2c.completeConnect(connected !== undefined);
+    const ack = connected !== undefined && (mode === I2CMode.Write ? connected.startWrite() : connected.startRead());
+    if (!ack) connected = undefined;
+    i2c.completeConnect(ack);
     i2cTrace.push(`${address.toString(16)}:${mode === I2CMode.Write ? 'w' : 'r'}:${connected ? 'ack' : 'nack'}`);
     if (i2cTrace.length > 20) i2cTrace.shift();
   };
   i2c.onWriteByte = value => {
-    connected?.writeByte(value);
-    i2c.completeWrite(connected !== undefined);
+    i2c.completeWrite(connected?.writeByte(value) ?? false);
   };
   i2c.onReadByte = () => i2c.completeRead(connected?.readByte() ?? 0xff);
   i2c.onStop = () => {
@@ -129,6 +127,9 @@ async function main(): Promise<void> {
 
   const cycleNanos = 1e9 / 125_000_000 * args.timingAcceleration;
   const pwm = mcu.pwm.channels[0];
+  const servos = attachServoPwm(simulator);
+  const servoReady = (): boolean => servos.elevator.sample(simulator.clock.micros).kind === 'valid'
+    && servos.rudder.sample(simulator.clock.micros).kind === 'valid';
   if (!pwm) throw new Error('rp2040js has no PWM slice 0');
   // Released active-low buttons and centred analog stick with full auto authority.
   for (const pinNumber of [10, 11, 12, 13]) mcu.gpio[pinNumber]?.setInputValue(true);
@@ -210,7 +211,7 @@ async function main(): Promise<void> {
   const instructionLimit = 100_000_000;
   let lastFlashPc = mcu.core.PC;
   let invalidPc: number | undefined;
-  while (((pwm.cc & 0xffff) === 0 || safetyFailsafe) && instructions < instructionLimit) {
+  while ((!servoReady() || safetyFailsafe) && instructions < instructionLimit) {
     if (mcu.core.PC >= 0x1000_0000 && mcu.core.PC < 0x1020_0000) lastFlashPc = mcu.core.PC;
     else if (pwm.top === 19_999 && mcu.core.PC > 0x0000_4000) {
       invalidPc = mcu.core.PC;
@@ -220,7 +221,7 @@ async function main(): Promise<void> {
     simulator.clock.tick(cycles * cycleNanos);
     instructions += 1;
   }
-  if ((pwm.cc & 0xffff) === 0 || safetyFailsafe) {
+  if (!servoReady() || safetyFailsafe) {
     throw new Error(
       `firmware did not reach preflight arm: pc=0x${mcu.core.PC.toString(16)} ` +
       `last_flash_pc=0x${lastFlashPc.toString(16)} invalid_pc=${invalidPc?.toString(16) ?? 'none'} ` +
@@ -237,7 +238,7 @@ async function main(): Promise<void> {
   mkdirSync(dirname(outputPath), { recursive: true });
   const output = createWriteStream(outputPath, { encoding: 'utf8' });
   output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed\n');
-  let nextFirmwareTickUs = simulator.clock.micros + 10_000;
+  let nextFirmwareTickUs = simulator.clock.micros + args.dtS * 1e6;
   let runningMinimumAltitude = observation.altitude_m;
   let maximumReascent = 0;
   let maximumFlightPathDeg = observation.flight_path_rad * 180 / Math.PI;
@@ -247,10 +248,8 @@ async function main(): Promise<void> {
   let deadlineMissDurationS = 0;
 
   for (let step = 0; step < args.steps && !observation.surface_contact; step += 1) {
-    const pulseUs = pwm.cc & 0xffff;
-    const rudderPulseUs = (pwm.cc >>> 16) & 0xffff;
-    const elevatorCommandRad = (pulseUs - 1500) * (10 * Math.PI / 180) / 500;
-    const rudderCommandRad = (rudderPulseUs - 1500) * (10 * Math.PI / 180) / 500;
+    const elevatorCommandRad = servos.elevator.sample(simulator.clock.micros).commandRad;
+    const rudderCommandRad = servos.rudder.sample(simulator.clock.micros).commandRad;
     bridge.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
     observation = await readObservation();
     updateDevices();
@@ -278,13 +277,14 @@ async function main(): Promise<void> {
     if (sensorSampleInvalid) invalidSampleDurationS += args.dtS;
     if (deadlineMissed) deadlineMissDurationS += args.dtS;
 
-    while (simulator.clock.micros < nextFirmwareTickUs && instructions < instructionLimit) {
+    const stepInstructionStart = instructions;
+    while (simulator.clock.micros < nextFirmwareTickUs && instructions - stepInstructionStart < instructionLimit) {
       const cycles = mcu.core.executeInstruction();
       simulator.clock.tick(cycles * cycleNanos);
       instructions += 1;
     }
-    if (instructions >= instructionLimit) throw new Error('virtual MCU instruction limit reached');
-    nextFirmwareTickUs += 10_000;
+    if (instructions - stepInstructionStart >= instructionLimit) throw new Error('virtual MCU per-step instruction watchdog reached');
+    nextFirmwareTickUs += args.dtS * 1e6;
   }
   output.end();
   await once(output, 'finish');

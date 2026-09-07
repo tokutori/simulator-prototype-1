@@ -1,6 +1,7 @@
 //! Minimal datasheet-level drivers for the flight-control sensor set.
 
 use core::f32::consts::PI;
+use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::I2c;
 
 pub const BNO055_ADDRESS: u8 = 0x28;
@@ -69,6 +70,8 @@ pub struct Measurements {
 #[derive(Clone, Copy)]
 pub struct MeasurementFrame {
     pub measurements: Measurements,
+    /// True only for a newly read DPS310 conversion, even if its value is unchanged.
+    pub pressure_sample_fresh: bool,
     /// False when airspeed is being held from the last valid SDP810 sample.
     pub all_sensors_valid: bool,
 }
@@ -95,8 +98,9 @@ pub struct SensorState {
 }
 
 impl SensorState {
-    pub fn initialize<I: I2c>(
+    pub fn initialize<I: I2c, D: DelayNs>(
         i2c: &mut I,
+        delay: &mut D,
         retained_launch_pressure_pa: Option<f32>,
     ) -> Result<Self, SensorError<I::Error>> {
         let mut chip_id = [0_u8; 1];
@@ -107,6 +111,11 @@ impl SensorState {
         }
         i2c.write(BNO055_ADDRESS, &[BNO055_OPERATION_MODE, BNO055_NDOF_MODE])
             .map_err(SensorError::Bus)?;
+        // Also valid during recovery when SDP810 is still measuring. Datasheet
+        // section 6.3.2 requires stop followed by 500 us before another command.
+        i2c.write(SDP810_ADDRESS, &[0x3f, 0xf9])
+            .map_err(SensorError::Bus)?;
+        delay.delay_us(500);
         i2c.write(SDP810_ADDRESS, &[0x36, 0x15])
             .map_err(SensorError::Bus)?;
 
@@ -201,7 +210,7 @@ impl SensorState {
             },
         };
 
-        let pressure_pa = self.read_pressure_pa(i2c)?;
+        let (pressure_pa, pressure_sample_fresh) = self.read_pressure_pa(i2c)?;
         let launch_pressure_pa = *self.launch_pressure_pa.get_or_insert(pressure_pa);
         let altitude_m = LAUNCH_ALTITUDE_M
             + (launch_pressure_pa - pressure_pa) / (AIR_DENSITY_KG_M3 * GRAVITY_MPS2);
@@ -218,10 +227,14 @@ impl SensorState {
                 barometric_altitude_m: altitude_m,
             },
             all_sensors_valid: airspeed_valid,
+            pressure_sample_fresh,
         })
     }
 
-    fn read_pressure_pa<I: I2c>(&mut self, i2c: &mut I) -> Result<f32, SensorError<I::Error>> {
+    fn read_pressure_pa<I: I2c>(
+        &mut self,
+        i2c: &mut I,
+    ) -> Result<(f32, bool), SensorError<I::Error>> {
         let mut status = [0_u8; 1];
         i2c.write_read(DPS310_ADDRESS, &[DPS310_MEASUREMENT_CONFIG], &mut status)
             .map_err(SensorError::Bus)?;
@@ -235,7 +248,7 @@ impl SensorState {
                 return Err(SensorError::Dps310NotReady(status[0]));
             }
             self.pressure_hold_reads += 1;
-            return Ok(last_pressure_pa);
+            return Ok((last_pressure_pa, false));
         }
         let mut raw = [0_u8; 6];
         i2c.write_read(DPS310_ADDRESS, &[DPS310_PRESSURE_RESULT], &mut raw)
@@ -247,7 +260,7 @@ impl SensorState {
             c.c00 + p * (c.c10 + p * (c.c20 + p * c.c30)) + t * c.c01 + t * p * (c.c11 + p * c.c21);
         self.last_pressure_pa = Some(pressure_pa);
         self.pressure_hold_reads = 0;
-        Ok(pressure_pa)
+        Ok((pressure_pa, true))
     }
 }
 

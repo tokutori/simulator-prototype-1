@@ -92,7 +92,12 @@ test('AS5600 maps zero AoA to installation midpoint and wraps 12 bits', () => {
 });
 
 test('SDP810 frame carries scale 60 and valid CRC words', () => {
-  const device = new Sdp810Device();
+  let nowUs = 0;
+  const device = new Sdp810Device(() => nowUs);
+  assert.equal(device.startRead(), false);
+  device.startWrite(); device.writeByte(0x36); assert.equal(device.writeByte(0x15), true);
+  assert.equal(device.startRead(), false);
+  nowUs = 8000;
   device.update(observation({ sensor_differential_pressure_pa: 10 }));
   device.startRead();
   const frame = Uint8Array.from({ length: 9 }, () => device.readByte());
@@ -107,24 +112,49 @@ test('SDP810 frame carries scale 60 and valid CRC words', () => {
 });
 
 test('DPS310 exposes ready bits while preserving configured measurement mode', () => {
-  const device = new Dps310Device();
+  let nowUs = 0;
+  const device = new Dps310Device(() => nowUs);
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xc0]);
+  device.update(observation());
+  nowUs = 1e6;
+  assert.deepEqual(readRegisters(device, 0x08, 1), [0xc0]);
+  device.startWrite(); device.writeByte(0x06); device.writeByte(0x50);
   device.startWrite();
   device.writeByte(0x08);
   device.writeByte(0x07);
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xc7]);
+  nowUs += 31250;
   device.update(observation());
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xd7]);
   readRegisters(device, 0x00, 3);
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xc7]);
   device.update(observation());
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xc7]);
-  device.update(observation());
-  device.update(observation());
-  device.update(observation());
+  nowUs += 31250;
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xd7]);
   device.update(observation({ time_s: 0.08 }), 'dps-stale');
   assert.deepEqual(readRegisters(device, 0x08, 1), [0xc7]);
   device.update(observation(), 'dps-not-ready');
   assert.deepEqual(readRegisters(device, 0x08, 1), [0x07]);
+});
+
+test('SDP810 rejects repeated start and requires stop recovery delay', () => {
+  let nowUs = 0;
+  const device = new Sdp810Device(() => nowUs);
+  const command = (word: number): boolean => {
+    if (!device.startWrite()) return false;
+    device.writeByte(word >>> 8); return device.writeByte(word & 255);
+  };
+  assert.equal(command(0x3615), true);
+  nowUs = 9000;
+  assert.equal(command(0x3615), false);
+  assert.equal(command(0x3ff9), true);
+  assert.equal(device.startRead(), false);
+  nowUs += 499;
+  assert.equal(command(0x3615), false);
+  nowUs += 1;
+  assert.equal(command(0x3615), true);
+  assert.equal(device.startRead(), false);
+  nowUs += 8000;
+  assert.equal(device.startRead(), true);
 });

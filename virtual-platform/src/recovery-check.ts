@@ -16,6 +16,7 @@ const cases = [
   { name: 'persistent-reset', fault: 'bno-reset', updates: '0', duration: '0.5', minimum: 2, maximum: 10 },
 ];
 let identity = '';
+const scenarioIdentities = new Set<string>();
 for (const scenario of cases) {
   const summaryPath = resolve(folder, `${scenario.name}.json`);
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/run.ts', '--steps', '200',
@@ -26,7 +27,11 @@ for (const scenario of cases) {
   assert.equal(result.status, 0, result.stderr);
   const summary = JSON.parse(readFileSync(summaryPath, 'utf8'));
   assert.equal(summary.evidence_version, 1);
-  const current = JSON.stringify(summary.inputs);
+  const { scenario_sha256: scenarioDigest, ...artifacts } = summary.inputs;
+  assert.match(scenarioDigest, /^[a-f0-9]{64}$/);
+  assert.equal(scenarioIdentities.has(scenarioDigest), false, 'different fault scenarios must retain distinct identities');
+  scenarioIdentities.add(scenarioDigest);
+  const current = JSON.stringify(artifacts);
   if (identity === '') identity = current;
   assert.equal(current, identity, 'all scenarios must use identical artifacts');
   assert.equal(summary.timing_acceleration, 1);

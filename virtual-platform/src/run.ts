@@ -261,7 +261,7 @@ async function main(): Promise<void> {
   const outputPath = resolve(repositoryRoot, args.output);
   mkdirSync(dirname(outputPath), { recursive: true });
   const output = createWriteStream(outputPath, { encoding: 'utf8' });
-  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed,firmware_sequence,firmware_time_us,automatic_valid,automatic_elevator_command_deg,automatic_rudder_command_deg,safe_elevator_command_deg,mixed_elevator_command_deg,mixed_rudder_command_deg,elevator_pwm_sample_time_us,rudder_pwm_sample_time_us,plant_interval_start_s,safe_rudder_command_deg,observed_elevator_command_deg,observed_rudder_command_deg,uf2_sha256,model_sha256,plant_sha256,release_mcu_time_us,elevator_deg,rudder_deg,pilot_elevator,pilot_rudder,autonomy,manual_elevator_command_deg,manual_rudder_command_deg,east_m,roll_deg,yaw_deg\n');
+  output.write('time_s,north_m,altitude_m,flight_path_deg,pitch_deg,airspeed_mps,alpha_deg,elevator_command_deg,elevator_actual_deg,rudder_command_deg,rudder_actual_deg,aero_in_range,surface_contact,sensor_fault_injected,sensor_sample_invalid,safety_failsafe,deadline_missed,firmware_sequence,firmware_time_us,automatic_valid,automatic_elevator_command_deg,automatic_rudder_command_deg,safe_elevator_command_deg,mixed_elevator_command_deg,mixed_rudder_command_deg,elevator_pwm_sample_time_us,rudder_pwm_sample_time_us,plant_interval_start_s,safe_rudder_command_deg,observed_elevator_command_deg,observed_rudder_command_deg,uf2_sha256,model_sha256,plant_sha256,release_mcu_time_us,elevator_deg,rudder_deg,pilot_elevator,pilot_rudder,autonomy,manual_elevator_command_deg,manual_rudder_command_deg,east_m,roll_deg,yaw_deg,virtual_platform_sha256,scenario_sha256\n');
   let nextFirmwareTickUs = simulator.clock.micros + args.dtS * 1e6;
   let runningMinimumAltitude = observation.altitude_m;
   let maximumReascent = 0;
@@ -313,6 +313,7 @@ async function main(): Promise<void> {
       actualDeg, rudderActualDeg, record.pilotElevator, record.pilotRudder, record.autonomy,
       record.pilotElevator * 10, -record.pilotRudder * 10,
       observation.east_m, observation.roll_rad * 180 / Math.PI, observation.yaw_rad * 180 / Math.PI,
+      inputIdentity.virtual_platform_sha256, inputIdentity.scenario_sha256,
     ].join(',') + '\n');
     runningMinimumAltitude = Math.min(runningMinimumAltitude, observation.altitude_m);
     maximumReascent = Math.max(maximumReascent, observation.altitude_m - runningMinimumAltitude);

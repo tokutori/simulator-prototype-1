@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { createServer as createViteServer } from "vite";
 import { WebSocket, WebSocketServer } from "ws";
+import { ResponseDeadline } from './src/response-deadline';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -73,6 +74,7 @@ webSockets.on("connection", (webSocket) => {
   };
   let nextStepAtMs = 0;
   let terminalReceived = false;
+  const responseDeadline = new ResponseDeadline(5000);
   try {
     bridge = spawn(process.execPath, [tsxCliPath, webBridgePath], { cwd: projectDirectory, windowsHide: true });
   } catch (error) {
@@ -83,10 +85,12 @@ webSockets.on("connection", (webSocket) => {
 
   const lines = createInterface({ input: bridge.stdout });
   lines.on("line", (line) => {
+    if (terminalReceived) return;
     try {
       const status = JSON.parse(line) as { type?: string; backend?: string };
       if (status.type === "ended" || status.type === "error") {
         terminalReceived = true;
+        responseDeadline.complete();
         cancelStep();
         clearTimeout(startupTimer);
         if (webSocket.readyState === WebSocket.OPEN) webSocket.send(line);
@@ -106,6 +110,7 @@ webSockets.on("connection", (webSocket) => {
     if (webSocket.readyState === WebSocket.OPEN) {
       webSocket.send(line);
     }
+    responseDeadline.complete();
     scheduleStep();
   });
   let errorText = "";
@@ -114,6 +119,7 @@ webSockets.on("connection", (webSocket) => {
     errorText += chunk;
   });
   bridge.on("exit", (code) => {
+    clearInterval(responseMonitor);
     cancelStep();
     clearTimeout(startupTimer);
     if (!terminalReceived && webSocket.readyState === WebSocket.OPEN) {
@@ -160,6 +166,7 @@ webSockets.on("connection", (webSocket) => {
       Date.now() - lastInputAt > inputTimeoutMs
         ? { ...command, pilot_elevator: 0, pilot_rudder: 0 }
         : command;
+    responseDeadline.begin(performance.now());
     bridge.stdin.write(`${JSON.stringify(safeCommand)}\n`);
   };
   const scheduleStep = (): void => {
@@ -178,7 +185,19 @@ webSockets.on("connection", (webSocket) => {
     bridge?.kill();
   }, 15_000);
 
+  // This timer lives outside the CPU-emulation/plant process: a blocked plant
+  // read cannot freeze the watchdog that supervises it.
+  const responseMonitor = setInterval(() => {
+    if (terminalReceived || !responseDeadline.expired(performance.now())) return;
+    terminalReceived = true;
+    cancelStep();
+    clearInterval(responseMonitor);
+    sendJson(webSocket, { type: 'error', message: 'actual-UF2 bridge response timed out after 5 seconds (wall clock)' });
+    bridge?.kill();
+  }, 250);
+
   webSocket.on("close", () => {
+    clearInterval(responseMonitor);
     cancelStep();
     clearTimeout(startupTimer);
     lines.close();

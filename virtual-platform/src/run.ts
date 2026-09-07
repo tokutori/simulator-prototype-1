@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { stepMcu } from './mcu-step.js';
+import { hashValue, virtualPlatformDigest } from './run-identity.js';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -54,6 +55,12 @@ const inputIdentity = {
   uf2_sha256: createHash('sha256').update(readFileSync(uf2Path)).digest('hex'),
   model_sha256: createHash('sha256').update(readFileSync(modelPath)).digest('hex'),
   plant_sha256: createHash('sha256').update(readFileSync(bridgePath)).digest('hex'),
+  virtual_platform_sha256: virtualPlatformDigest(repositoryRoot),
+  scenario_sha256: hashValue({ backend: 'batch', dt_s: args.dtS, steps: args.steps,
+    timing_acceleration: args.timingAcceleration,
+    gust: [args.gustNorthMps, args.gustEastMps, args.gustDownMps],
+    fault: [args.sensorFault, args.faultStartS, args.faultDurationS, args.faultUpdateCount],
+    coupling: 'held-start-inputs' }),
 };
 const bridgeArguments = [
   '--model', modelPath,

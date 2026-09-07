@@ -13,6 +13,7 @@ import { attachServoPwm } from './servo-pwm.js';
 import { advanceUntil } from './execution-budget.js';
 import { installWatchdogMonitor } from './watchdog-monitor.js';
 import { stepMcu } from './mcu-step.js';
+import { hashValue, virtualPlatformDigest } from './run-identity.js';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -28,7 +29,10 @@ const bridgePath = resolve(root, 'target', 'debug', executable);
 const uf2Path = resolve(root, 'target', 'virtual-platform', 'fbw-rp2040.uf2');
 const modelPath = resolve(root, 'models', 'qx18-br-training-envelope.json');
 const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
-const runIdentity = { uf2_sha256: digest(uf2Path), model_sha256: digest(modelPath), plant_sha256: digest(bridgePath) };
+const runIdentity = { uf2_sha256: digest(uf2Path), model_sha256: digest(modelPath), plant_sha256: digest(bridgePath),
+  virtual_platform_sha256: virtualPlatformDigest(root),
+  scenario_sha256: hashValue({ backend: 'interactive', dt_s: 0.01, timing_acceleration: 1,
+    coupling: 'held-start-inputs', pilot: 'recorded-live-inputs' }) };
 for (const path of [bridgePath, uf2Path, modelPath]) {
   if (!existsSync(path)) throw new Error(`required actual-UF2 input is missing: ${path}`);
 }
@@ -38,12 +42,25 @@ const plant = spawn(bridgePath, ['--model', modelPath, '--dt', '0.01'], {
   windowsHide: true,
   stdio: ['pipe', 'pipe', 'pipe'],
 });
+process.on('exit', () => { plant.kill(); });
 let plantError = '';
 plant.stderr.setEncoding('utf8');
 plant.stderr.on('data', (chunk: string) => { plantError = (plantError + chunk).slice(-4096); });
 const plantLines = createInterface({ input: plant.stdout })[Symbol.asyncIterator]();
 const readPlant = async (): Promise<PlantObservation> => {
-  const next = await plantLines.next();
+  const next = await new Promise<IteratorResult<string>>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      plant.kill();
+      reject(new Error('plant response timed out after 4 seconds (wall clock)'));
+    }, 4000);
+    void plantLines.next().then(value => {
+      clearTimeout(timeout);
+      resolve(value);
+    }, error => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
   if (next.done) throw new Error(plantError.trim() || 'plant bridge stopped');
   return JSON.parse(next.value) as PlantObservation;
 };
@@ -194,6 +211,7 @@ async function step(line: string): Promise<void> {
     release_mcu_time_us: releaseMcuTimeUs,
     backend: 'rp2040js-actual-uf2',
     emulation: {
+      wall_elapsed_ms: wallElapsedMs,
       mcu_processing_ms: mcuProcessingMs,
       plant_round_trip_ms: plantRoundTripMs,
       instructions: instructions - instructionsBefore,
@@ -242,5 +260,3 @@ function parseCommand(line: string): PilotCommand {
   if (![value.pilot_elevator, value.pilot_rudder, value.autonomy].every(Number.isFinite)) throw new Error('invalid pilot command');
   return value;
 }
-
-process.on('exit', () => { plant.kill(); });

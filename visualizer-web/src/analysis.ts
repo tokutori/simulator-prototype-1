@@ -1,11 +1,10 @@
 import "./analysis.css";
 
 import {
-  analysisStorageKey,
-  parseAnalysisDataset,
   summarizeFlight,
   type FlightAnalysisDataset,
 } from "./analysis-data.ts";
+import { loadAnalysis } from "./analysis-storage.ts";
 import type { FlightFrame } from "./types.ts";
 import { applyUiScale } from "./ui-scale.ts";
 
@@ -15,16 +14,21 @@ const seriesColors = ["series-0", "series-1", "series-2", "series-3", "series-4"
 let dataset: FlightAnalysisDataset | undefined;
 
 applyUiScale(window.innerWidth, window.innerHeight);
-try {
-  const raw = localStorage.getItem(analysisStorageKey);
-  if (!raw) throw new Error("No flight has been sent from the simulator. Open Flight analysis after a replay or landing.");
-  dataset = parseAnalysisDataset(raw);
-  render(dataset);
-} catch (error) {
-  element("analysis-status").textContent = "NO DATA";
-  const message = element("analysis-error");
-  message.textContent = String(error);
-  message.hidden = false;
+void initializeAnalysis();
+
+async function initializeAnalysis(): Promise<void> {
+  try {
+    element("analysis-status").textContent = "LOADING FULL RECORD";
+    const id = new URLSearchParams(location.search).get("flight");
+    if (!id) throw new Error("Open Flight analysis from the simulator after a replay or landing.");
+    dataset = await loadAnalysis(id);
+    render(dataset);
+  } catch (error) {
+    element("analysis-status").textContent = "NO DATA";
+    const message = element("analysis-error");
+    message.textContent = String(error);
+    message.hidden = false;
+  }
 }
 
 window.addEventListener("resize", () => {
@@ -110,8 +114,10 @@ function renderTimeChart(
   const firstTime = frames[0]?.timeS ?? 0;
   const duration = Math.max(1e-6, (frames.at(-1)?.timeS ?? firstTime) - firstTime);
   const values = definitions.flatMap(definition => frames.filter(definition.valid).map(frame => definition.value(frame))).filter(Number.isFinite);
-  let minimum = Math.min(...values);
-  let maximum = Math.max(...values);
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (const value of values) { minimum = Math.min(minimum, value); maximum = Math.max(maximum, value); }
+  if (values.length === 0) { minimum = -1; maximum = 1; }
   if (minimum === maximum) { minimum -= 1; maximum += 1; }
   const padding = (maximum - minimum) * 0.08;
   minimum -= padding;
@@ -169,11 +175,12 @@ function renderTrajectory(id: string, frames: readonly FlightFrame[]): void {
   const first = frames[0];
   if (!first) return;
   const relative = frames.map(frame => ({ east: frame.eastM - first.eastM, north: frame.northM - first.northM }));
-  const maximumRadius = Math.max(50, ...relative.map(point => Math.hypot(point.east, point.north)));
+  const maximumRadius = relative.reduce((maximum, point) => Math.max(maximum, Math.hypot(point.east, point.north)), 50);
   const ringMaximum = Math.ceil(maximumRadius / 50) * 50;
   const centerX = 450;
-  const centerY = 395;
-  const scale = Math.min(360 / ringMaximum, 390 / ringMaximum);
+  // Manual/turning flights can travel south of launch too: fit the entire circle.
+  const centerY = 210;
+  const scale = 180 / ringMaximum;
   for (let radius = 50; radius <= ringMaximum; radius += 50) {
     svg.appendChild(svgElement("circle", { class: "ring", cx: centerX, cy: centerY, r: radius * scale }));
     svg.appendChild(svgText(centerX + 5, centerY - radius * scale + 14, `${radius} m`, "start"));

@@ -20,7 +20,8 @@ import {
 import { VRButton } from "three/addons/webxr/VRButton.js";
 
 import "./style.css";
-import { analysisStorageKey, prepareAnalysisDataset } from "./analysis-data.ts";
+import { prepareAnalysisDataset } from "./analysis-data.ts";
+import { storeAnalysis } from "./analysis-storage.ts";
 import {
   acceptsSessionEvent,
   isInteractive,
@@ -667,14 +668,20 @@ function setFlightEvent(kicker: string, title: string, detail: string, actionLab
   event.hidden = false;
 }
 
-function openCurrentAnalysis(): void {
+async function openCurrentAnalysis(): Promise<void> {
   const frames = isInteractive(appState) ? liveFrames : replayFrames;
   if (frames.length < 2) return;
   const name = isInteractive(appState) ? "interactive actual-UF2 flight" : replayName;
+  const tab = window.open("about:blank", "_blank");
+  if (!tab) { showMessage("Allow pop-ups to open Flight analysis. The raw CSV can still be downloaded."); return; }
+  tab.opener = null;
+  tab.document.body.textContent = "Saving complete flight data for analysis…";
   try {
-    localStorage.setItem(analysisStorageKey, JSON.stringify(prepareAnalysisDataset(name, frames)));
-    window.open("/analysis.html", "_blank", "noopener");
+    const id = crypto.randomUUID();
+    await storeAnalysis(id, prepareAnalysisDataset(name, frames));
+    tab.location.replace(`/analysis.html?flight=${encodeURIComponent(id)}`);
   } catch (error) {
+    tab.close();
     showMessage(`Flight analysis could not be opened: ${String(error)}`);
   }
 }

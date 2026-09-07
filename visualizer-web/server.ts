@@ -63,6 +63,7 @@ webSockets.on("connection", (webSocket) => {
   let bridge: ChildProcessWithoutNullStreams | undefined;
   let stepTimer: ReturnType<typeof setTimeout> | undefined;
   let nextStepAtMs = 0;
+  let terminalReceived = false;
   try {
     bridge = spawn(process.execPath, [tsxCliPath, webBridgePath], { cwd: projectDirectory, windowsHide: true });
   } catch (error) {
@@ -75,6 +76,13 @@ webSockets.on("connection", (webSocket) => {
   lines.on("line", (line) => {
     try {
       const status = JSON.parse(line) as { type?: string; backend?: string };
+      if (status.type === "ended" || status.type === "error") {
+        terminalReceived = true;
+        if (stepTimer) clearTimeout(stepTimer);
+        clearTimeout(startupTimer);
+        if (webSocket.readyState === WebSocket.OPEN) webSocket.send(line);
+        return;
+      }
       if (status.type === "ready") {
         if (status.backend !== "rp2040js-actual-uf2") throw new Error("unexpected MCU backend");
         clearTimeout(startupTimer);
@@ -99,10 +107,10 @@ webSockets.on("connection", (webSocket) => {
   bridge.on("exit", (code) => {
     if (stepTimer) clearTimeout(stepTimer);
     clearTimeout(startupTimer);
-    if (webSocket.readyState === WebSocket.OPEN) {
+    if (!terminalReceived && webSocket.readyState === WebSocket.OPEN) {
       sendJson(webSocket, {
-        type: code === 0 ? "ended" : "error",
-        message: code === 0 ? "surface contact" : errorText.trim() || `bridge exited with ${code}`,
+        type: "error",
+        message: errorText.trim() || `bridge exited with ${code} without a terminal reason`,
       });
     }
   });
@@ -146,6 +154,7 @@ webSockets.on("connection", (webSocket) => {
     bridge.stdin.write(`${JSON.stringify(safeCommand)}\n`);
   };
   const scheduleStep = (): void => {
+    if (terminalReceived) return;
     if (stepTimer) clearTimeout(stepTimer);
     nextStepAtMs += stepPeriodMs;
     stepTimer = setTimeout(sendStep, Math.max(0, nextStepAtMs - performance.now()));

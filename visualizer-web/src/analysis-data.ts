@@ -1,9 +1,7 @@
 import type { FlightFrame } from "./types.ts";
 
-export const analysisStorageKey = "birdman-flight-analysis-v1";
-
 export interface FlightAnalysisDataset {
-  version: 1;
+  version: 2;
   name: string;
   storedAtIso: string;
   frames: FlightFrame[];
@@ -23,20 +21,20 @@ export function prepareAnalysisDataset(
   name: string,
   frames: readonly FlightFrame[],
   storedAt = new Date(),
-  maximumFrames = 1600,
 ): FlightAnalysisDataset {
   if (frames.length < 2) throw new Error("analysis requires at least two flight frames");
   return {
-    version: 1,
+    version: 2,
     name,
     storedAtIso: storedAt.toISOString(),
-    frames: downsampleFrames(frames, maximumFrames),
+    // Preserve the evidence: decimation aliases oscillations and changes extrema/track length.
+    frames: [...frames],
   };
 }
 
 export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
   const candidate = JSON.parse(raw) as Partial<FlightAnalysisDataset>;
-  if (candidate.version !== 1 || typeof candidate.name !== "string" || !Array.isArray(candidate.frames)) {
+  if (!candidate || candidate.version !== 2 || typeof candidate.name !== "string" || !Array.isArray(candidate.frames)) {
     throw new Error("stored flight analysis has an unsupported format");
   }
   if (candidate.frames.length < 2 || candidate.frames.some((frame) =>
@@ -44,10 +42,26 @@ export function parseAnalysisDataset(raw: string): FlightAnalysisDataset {
     || frame === null
     || !Number.isFinite((frame as FlightFrame).timeS)
     || !Number.isFinite((frame as FlightFrame).northM)
-    || !Number.isFinite((frame as FlightFrame).altitudeM))) {
+    || !Number.isFinite((frame as FlightFrame).altitudeM)
+    || !validFrame(frame))) {
     throw new Error("stored flight analysis contains invalid telemetry");
   }
   return candidate as FlightAnalysisDataset;
+}
+
+function validFrame(value: FlightFrame): boolean {
+  const numericKeys: readonly (keyof FlightFrame)[] = ["timeS", "northM", "eastM", "altitudeM",
+    "rollRad", "pitchRad", "yawRad", "flightPathRad", "airspeedMps", "alphaRad", "elevatorRad", "rudderRad",
+    "pilotElevator", "pilotRudder", "autonomy", "manualElevatorCommandRad", "manualRudderCommandRad",
+    "automaticElevatorCommandRad", "automaticRudderCommandRad", "mixedElevatorCommandRad", "mixedRudderCommandRad"];
+  if (numericKeys.some(key => typeof value[key] !== "number" || !Number.isFinite(value[key]))
+    || typeof value.surfaceContact !== "boolean") return false;
+  const evidence = value.controlTelemetry;
+  if (!evidence || typeof evidence !== "object") return false;
+  if (evidence.tag === "unavailable") return true;
+  return evidence.tag === "firmware" && typeof evidence.automaticValid === "boolean"
+    && Object.entries(evidence).every(([key, entry]) => key === "tag" || key === "automaticValid"
+      || (typeof entry === "number" && Number.isFinite(entry)));
 }
 
 export function downsampleFrames(frames: readonly FlightFrame[], maximumFrames: number): FlightFrame[] {

@@ -26,5 +26,17 @@ viewerは`surface_contact`を0/1またはfalse/trueとして読み取ります�
 - pilot elevator/rudder入力
 - manual/automatic/mixed commandと実elevator/rudder舵角
 
-長い記録は先頭と末尾を保持して最大1600 frameへ等間隔downsampleしてから、同一originの
-`localStorage`を介してanalysis tabへ渡します。元のCSVやinteractive download logは変更しません。
+analysisには全frameを保存し、統計もグラフも間引く前の記録を用います。等間隔の間引きによる
+短時間の振動・最大値の欠落を避けます。120秒/100 Hzの12,001 frameを保持する回帰試験があります。
+データは同一originのIndexedDBへ記録ごとのUUIDで保存するため、複数のanalysis tabが互いの
+記録を上書きしません。ブラウザの保存容量やpopup制限で失敗した場合は画面へ表示します。
+保存は永続バックアップの代わりではありません。必要な記録はCSVもダウンロードしてください。
+
+actual-UF2記録にはfirmware sequence/time、automatic_valid、安全処理後指令、実際に受信した
+PWM指令とその受信時刻を保持します。automatic_valid=falseの区間は自動指令のグラフを切り、
+ゼロ指令が計算されたと誤表示しません。古いCSVでfirmware証拠がないものはunavailableとして
+区別します。表示補間はfirmware sequence/timeを補間しません。
+
+計測境界は異なります。PWM receivedは出力ピン上の有効なパルスから得た指令であり、
+Mixed commandはfirmwareのソフトウェア指令、Actualはサーボ動特性を経た模擬舵角です。
+これらの差は即座に制御不良を意味しません。CSV内の時刻と更新周期を合わせて比較してください。

@@ -43,3 +43,12 @@ test("flight summary distinguishes range and flown track", () => {
 test("analysis parser rejects malformed persisted data", () => {
   assert.throws(() => parseAnalysisDataset('{"version":2,"frames":[]}'), /unsupported format/);
 });
+
+test("analysis preserves all long-run samples and brief extrema", () => {
+  const frames = Array.from({ length: 12001 }, (_, index) => frame(index / 100, index / 10, 0));
+  frames[7] = { ...frame(0.07, 0.7, 0), altitudeM: 99, rollRad: 1 };
+  const dataset = prepareAnalysisDataset("long-run", frames);
+  assert.equal(dataset.frames.length, 12001);
+  assert.equal(summarizeFlight(dataset.frames).maximumAltitudeM, 99);
+  assert.equal(parseAnalysisDataset(JSON.stringify(dataset)).frames.length, 12001);
+});

@@ -51,7 +51,7 @@ test('Sensirion CRC-8 matches the datasheet example', () => {
   assert.equal(crc8(Uint8Array.from([0xbe, 0xef])), 0x92);
 });
 
-test('BNO055 exposes all FBW attitude and rate channels at 1/16 degree', () => {
+test('BNO055 exposes configured physical sensor gyro and quaternion channels', () => {
   const device = new Bno055Device();
   device.update(observation({
     sensor_pitch_rad: -1.25 * Math.PI / 180,
@@ -61,10 +61,8 @@ test('BNO055 exposes all FBW attitude and rate channels at 1/16 degree', () => {
     sensor_pitch_rate_rad_s: 2.5 * Math.PI / 180,
     sensor_yaw_rate_rad_s: 1.5 * Math.PI / 180,
   }));
-  assert.deepEqual(readRegisters(device, 0x14, 6), [0xf0, 0xff, 40, 0, 24, 0]);
-  assert.deepEqual(readRegisters(device, 0x16, 2), [40, 0]);
-  assert.deepEqual(readRegisters(device, 0x1a, 4), [64, 0, 48, 0]);
-  assert.deepEqual(readRegisters(device, 0x1e, 2), [0xec, 0xff]);
+  assert.deepEqual(readRegisters(device, 0x14, 6), [40, 0, 0xf0, 0xff, 0xe8, 0xff]);
+  assert.throws(() => readRegisters(device, 0x1a, 6), /Euler registers/);
   assert.deepEqual(readRegisters(device, 0x00, 1), [0xa0]);
   device.startWrite();
   device.writeByte(0x3d);
@@ -82,6 +80,47 @@ test('BNO055 exposes all FBW attitude and rate channels at 1/16 degree', () => {
   device.update(observation());
   assert.equal(device.configurationWriteCount, 2);
   assert.deepEqual(readRegisters(device, 0x39, 2), [0x05, 0x00]);
+});
+
+test('BNO quaternion independent basis and mixed-pose direction cosine contract', () => {
+  const device = new Bno055Device();
+  const decode = (): number[] => {
+    const bytes = Uint8Array.from(readRegisters(device, 0x20, 8));
+    const view = new DataView(bytes.buffer);
+    return Array.from({ length: 4 }, (_, i) => view.getInt16(i * 2, true) / 16384);
+  };
+  for (const [state, expected] of [
+    [{ sensor_roll_rad: Math.PI / 2 }, [Math.SQRT1_2, 0, Math.SQRT1_2, 0]],
+    [{ sensor_pitch_rad: Math.PI / 2 }, [Math.SQRT1_2, Math.SQRT1_2, 0, 0]],
+    [{ sensor_yaw_rad: Math.PI / 2 }, [Math.SQRT1_2, 0, 0, -Math.SQRT1_2]],
+  ] as const) {
+    device.update(observation(state));
+    decode().forEach((value, i) => assert.ok(Math.abs(value - expected[i]!) < 1 / 16384));
+  }
+  const roll = .4, pitch = -.3, yaw = 1.1;
+  device.update(observation({ sensor_roll_rad: roll, sensor_pitch_rad: pitch, sensor_yaw_rad: yaw }));
+  const [w, x, y, z] = decode() as [number, number, number, number];
+  const sensorR = [[1-2*(y*y+z*z),2*(x*y-w*z),2*(x*z+w*y)],
+    [2*(x*y+w*z),1-2*(x*x+z*z),2*(y*z-w*x)], [2*(x*z-w*y),2*(y*z+w*x),1-2*(x*x+y*y)]];
+  // Independent matrix construction, all three basis vectors, including yaw.
+  const c = Math.cos, s = Math.sin;
+  const aircraftR = [[c(yaw)*c(pitch),c(yaw)*s(pitch)*s(roll)-s(yaw)*c(roll),c(yaw)*s(pitch)*c(roll)+s(yaw)*s(roll)],
+    [s(yaw)*c(pitch),s(yaw)*s(pitch)*s(roll)+c(yaw)*c(roll),s(yaw)*s(pitch)*c(roll)-c(yaw)*s(roll)],
+    [-s(pitch),c(pitch)*s(roll),c(pitch)*c(roll)]];
+  const order = [1,0,2], signs = [1,1,-1];
+  for (let row=0; row<3; row++) for (let col=0; col<3; col++) {
+    assert.ok(Math.abs(sensorR[order[row]!]![order[col]!]! * signs[row]! * signs[col]! - aircraftR[row]![col]!) < .0002);
+  }
+});
+
+test('BNO rejects unsupported units/remap and configuration outside CONFIGMODE', () => {
+  const device = new Bno055Device();
+  const write = (register: number, value: number): void => { device.startWrite(); device.writeByte(register); device.writeByte(value); };
+  assert.throws(() => write(0x3b, 0x86), /unsupported/);
+  assert.throws(() => write(0x41, 0x21), /unsupported/);
+  write(0x3d, 0x0c);
+  assert.throws(() => write(0x41, 0x24), /CONFIGMODE/);
+  write(0x3d, 0); write(0x41, 0x24);
 });
 
 test('AS5600 maps zero AoA to installation midpoint and wraps 12 bits', () => {

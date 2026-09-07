@@ -88,22 +88,30 @@ export class Bno055Device extends RegisterDevice {
     this.registers[0x00] = 0xa0;
     this.registers[0x39] = 0x05;
     this.registers[0x3a] = 0x00;
+    this.registers[0x3b] = 0x80;
+    this.registers[0x41] = 0x24;
   }
 
   update(observation: PlantObservation, fault: SensorFaultKind = 'none'): void {
-    const gyroXRaw = clampI16(Math.round(observation.sensor_roll_rate_rad_s * 180 / Math.PI * 16));
-    const gyroRaw = clampI16(Math.round(observation.sensor_pitch_rate_rad_s * 180 / Math.PI * 16));
-    const gyroZRaw = clampI16(Math.round(observation.sensor_yaw_rate_rad_s * 180 / Math.PI * 16));
-    const headingRaw = clampI16(Math.round(observation.sensor_yaw_rad * 180 / Math.PI * 16));
-    const rollRaw = clampI16(Math.round(observation.sensor_roll_rad * 180 / Math.PI * 16));
-    const pitchRaw = clampI16(Math.round(observation.sensor_pitch_rad * 180 / Math.PI * 16));
+    // Physical sensor axes X=right, Y=forward, Z=up. Gyro is a vector in
+    // sensor axes, not a vector named after the device's Euler fields.
+    const gyroXRaw = clampI16(Math.round(observation.sensor_pitch_rate_rad_s * 180 / Math.PI * 16));
+    const gyroRaw = clampI16(Math.round(observation.sensor_roll_rate_rad_s * 180 / Math.PI * 16));
+    const gyroZRaw = clampI16(Math.round(-observation.sensor_yaw_rate_rad_s * 180 / Math.PI * 16));
+    const r = observation.sensor_roll_rad / 2, p = observation.sensor_pitch_rad / 2, h = observation.sensor_yaw_rad / 2;
+    const cr = Math.cos(r), sr = Math.sin(r), cp = Math.cos(p), sp = Math.sin(p), ch = Math.cos(h), sh = Math.sin(h);
+    const w = cr * cp * ch + sr * sp * sh;
+    const x = cr * sp * ch + sr * cp * sh;
+    const y = sr * cp * ch - cr * sp * sh;
+    const z = -(cr * cp * sh - sr * sp * ch);
+    [w, x, y, z].forEach((value, index) => putI16Le(this.registers, 0x20 + index * 2, Math.round(value * 16384)));
     putI16Le(this.registers, 0x14, gyroXRaw);
     putI16Le(this.registers, 0x16, gyroRaw);
     putI16Le(this.registers, 0x18, gyroZRaw);
-    putI16Le(this.registers, 0x1a, headingRaw);
-    putI16Le(this.registers, 0x1c, rollRaw);
-    putI16Le(this.registers, 0x1e, pitchRaw);
-    if (fault === 'bno-reset') this.operationMode = 0;
+    if (fault === 'bno-reset') {
+      this.operationMode = 0;
+      this.registers[0x3d] = 0;
+    }
     const fusionRunning = this.operationMode === 0x0c
       && fault !== 'bno-status'
       && fault !== 'bno-reset';
@@ -116,10 +124,22 @@ export class Bno055Device extends RegisterDevice {
   }
 
   protected readRegister(register: number): number {
+    if (register >= 0x1a && register <= 0x1f) {
+      throw new Error('BNO055 Euler registers are outside the quaternion installation contract');
+    }
     return this.registers[register] ?? 0xff;
   }
 
   protected writeRegister(register: number, value: number): void {
+    // Configuration subset used by this installation. Unsupported remap/units
+    // cannot silently produce plausible flight data under another convention.
+    if ((register === 0x3b && value !== 0x80)
+      || (register === 0x41 && value !== 0x24) || (register === 0x42 && value !== 0)) {
+      throw new Error('unsupported BNO055 installation configuration');
+    }
+    if ([0x3b, 0x41, 0x42].includes(register) && this.operationMode !== 0) {
+      throw new Error('BNO055 configuration requires CONFIGMODE');
+    }
     this.registers[register] = value;
     if (register === 0x3d) {
       this.operationMode = value;

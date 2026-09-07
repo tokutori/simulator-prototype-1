@@ -10,12 +10,14 @@ initial SP/reset PCから実行する。firmware sourceにはsimulator専用peri
 | boundary | implementation | validated here | not validated here |
 | --- | --- | --- | --- |
 | controller | shared `no_std` f32 core | state machine、量子化後input、actual target codegen | control lawの実機安全性 |
-| IMU | BNO055 0x28 | CHIP_ID=0xA0、NDOF、SYS_STATUS=5/SYS_ERR=0、gyro Y/Euler pitch | fusion accuracy、axis remap、磁気外乱、振動 |
+| IMU | BNO055 0x28 | CHIP_ID=0xA0、NDOF、SYS_STATUS=5/SYS_ERR=0、Q14 quaternion＋gyro、明示FRD変換 | fusion accuracy、磁気外乱、振動、実取付validation |
 | AoA | AS5600 0x36 | STATUSのMD/MH/ML、RAW ANGLE 12 bit、wrap | vane空力、取付zero、linkage、flutter |
 | airspeed | SDP810 0x25 | 0x3615、9-byte frame全3 wordのCRC-8、nonzero scale | pitot係数、tube lag、水滴、position error |
 | barometer | DPS310 0x77 | SENSOR/COEF ready、PRS_RDY 32 Hz生成/read-clear/20-read timeout、coefficient decode、polynomial compensation | package stress、temperature drift、port dynamics |
 | actuator | KRS-compatible PWM | 20 ms、1000～2000 us、RP2040 PWM MMIO | loaded travel、backlash、current、brownout |
 | plant | Rust nonlinear 6DoF | same plant as native reference run | real aircraft coefficient validity |
+
+BNO055の軸・quaternion・設定契約は[bno055-frame-contract](bno055-frame-contract.md)を参照。
 
 ## Pilot input and output pin contract
 

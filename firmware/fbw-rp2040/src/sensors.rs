@@ -3,6 +3,8 @@
 use core::f32::consts::PI;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::I2c;
+#[path = "bno_orientation.rs"]
+mod bno_orientation;
 
 pub const BNO055_ADDRESS: u8 = 0x28;
 pub const AS5600_ADDRESS: u8 = 0x36;
@@ -14,6 +16,7 @@ const BNO055_NDOF_MODE: u8 = 0x0c;
 const BNO055_CHIP_ID: u8 = 0x00;
 const BNO055_EXPECTED_CHIP_ID: u8 = 0xa0;
 const BNO055_GYRO_X_LSB: u8 = 0x14;
+const BNO055_QUATERNION_W_LSB: u8 = 0x20;
 const BNO055_SYSTEM_STATUS: u8 = 0x39;
 const BNO055_FUSION_RUNNING: u8 = 0x05;
 const AS5600_STATUS: u8 = 0x0b;
@@ -43,6 +46,8 @@ pub enum SensorError<E> {
     Bno055ChipId(u8),
     /// Fusion is not running or the BNO055 reports a system error.
     Bno055System { status: u8, error: u8 },
+    /// Fusion quaternion is zero or inconsistent with a unit rotation.
+    Bno055Quaternion,
     /// AS5600 does not report one usable magnet in range.
     As5600Magnet(u8),
     /// One SDP810 response word failed its CRC-8 check.
@@ -109,6 +114,20 @@ impl SensorState {
         if chip_id[0] != BNO055_EXPECTED_CHIP_ID {
             return Err(SensorError::Bno055ChipId(chip_id[0]));
         }
+        let mut mode = [0_u8; 1];
+        i2c.write_read(BNO055_ADDRESS, &[BNO055_OPERATION_MODE], &mut mode)
+            .map_err(SensorError::Bus)?;
+        if mode[0] & 0x0f != 0 {
+            i2c.write(BNO055_ADDRESS, &[BNO055_OPERATION_MODE, 0])
+                .map_err(SensorError::Bus)?;
+            delay.delay_ms(19);
+        }
+        // Android orientation, degrees/s, identity P1 remap. The installation
+        // transform is explicit in bno_orientation, not hidden in Euler labels.
+        for (register, value) in [(0x3b, 0x80), (0x41, 0x24), (0x42, 0x00)] {
+            i2c.write(BNO055_ADDRESS, &[register, value])
+                .map_err(SensorError::Bus)?;
+        }
         i2c.write(BNO055_ADDRESS, &[BNO055_OPERATION_MODE, BNO055_NDOF_MODE])
             .map_err(SensorError::Bus)?;
         // Also valid during recovery when SDP810 is still measuring. Datasheet
@@ -174,14 +193,22 @@ impl SensorState {
             });
         }
 
-        let mut bno = [0_u8; 12];
+        let mut bno = [0_u8; 6];
         i2c.write_read(BNO055_ADDRESS, &[BNO055_GYRO_X_LSB], &mut bno)
             .map_err(SensorError::Bus)?;
         let gyro_x_raw = i16::from_le_bytes([bno[0], bno[1]]);
         let gyro_y_raw = i16::from_le_bytes([bno[2], bno[3]]);
         let gyro_z_raw = i16::from_le_bytes([bno[4], bno[5]]);
-        let roll_raw = i16::from_le_bytes([bno[8], bno[9]]);
-        let pitch_raw = i16::from_le_bytes([bno[10], bno[11]]);
+        let mut quaternion = [0_u8; 8];
+        i2c.write_read(BNO055_ADDRESS, &[BNO055_QUATERNION_W_LSB], &mut quaternion)
+            .map_err(SensorError::Bus)?;
+        let raw = core::array::from_fn(|index| {
+            i16::from_le_bytes([quaternion[2 * index], quaternion[2 * index + 1]])
+        });
+        let (roll_rad, pitch_rad) =
+            bno_orientation::attitude(raw).ok_or(SensorError::Bno055Quaternion)?;
+        let [roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s] =
+            bno_orientation::rates([gyro_x_raw, gyro_y_raw, gyro_z_raw]);
 
         let mut as5600_status = [0_u8; 1];
         i2c.write_read(AS5600_ADDRESS, &[AS5600_STATUS], &mut as5600_status)
@@ -217,11 +244,11 @@ impl SensorState {
 
         Ok(MeasurementFrame {
             measurements: Measurements {
-                roll_rad: f32::from(roll_raw) / 16.0 * PI / 180.0,
-                pitch_rad: f32::from(pitch_raw) / 16.0 * PI / 180.0,
-                roll_rate_rad_s: f32::from(gyro_x_raw) / 16.0 * PI / 180.0,
-                pitch_rate_rad_s: f32::from(gyro_y_raw) / 16.0 * PI / 180.0,
-                yaw_rate_rad_s: f32::from(gyro_z_raw) / 16.0 * PI / 180.0,
+                roll_rad,
+                pitch_rad,
+                roll_rate_rad_s,
+                pitch_rate_rad_s,
+                yaw_rate_rad_s,
                 airspeed_mps,
                 alpha_rad: wrapped_angle as f32 * (2.0 * PI / 4096.0),
                 barometric_altitude_m: altitude_m,

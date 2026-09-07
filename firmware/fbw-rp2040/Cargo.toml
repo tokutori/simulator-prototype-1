@@ -8,6 +8,7 @@ rust-version = "1.88"
 [workspace]
 
 [dependencies]
+cortex-m = "0.7.7"
 cortex-m-rt = "0.7.6"
 embedded-hal = "1.0.0"
 fbw-control-core = { path = "../../crates/fbw-control-core" }

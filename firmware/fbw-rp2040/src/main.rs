@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod period_wait;
 mod sensors;
 mod telemetry;
 
@@ -238,6 +239,7 @@ fn main() -> ! {
     let mut control_tick_high = false;
 
     let mut timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);
+    let mut period_wait = period_wait::PeriodWait::new(&mut timer);
     // UART1 GPIO8/9 is a production flight-recorder interface, not a simulator hook.
     let recorder = hal::uart::UartPeripheral::new(
         pac.UART1,
@@ -400,7 +402,7 @@ fn main() -> ! {
         let elapsed_us = timer.get_counter_low().wrapping_sub(update_start_us);
         if elapsed_us < CONTROL_PERIOD_US {
             let _ = deadline_missed.set_low();
-            timer.delay_us(CONTROL_PERIOD_US - elapsed_us);
+            period_wait.wait(CONTROL_PERIOD_US - elapsed_us);
         } else {
             let _ = deadline_missed.set_high();
         }

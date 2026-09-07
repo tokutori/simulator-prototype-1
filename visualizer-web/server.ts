@@ -61,7 +61,16 @@ webSockets.on("connection", (webSocket) => {
   };
   let lastInputAt = Date.now();
   let bridge: ChildProcessWithoutNullStreams | undefined;
-  let stepTimer: ReturnType<typeof setTimeout> | undefined;
+  let stepTimer: { tag: 'none' } | { tag: 'timer'; handle: ReturnType<typeof setTimeout> }
+    | { tag: 'immediate'; handle: ReturnType<typeof setImmediate> } = { tag: 'none' };
+  const cancelStep = (): void => {
+    switch (stepTimer.tag) {
+      case 'timer': clearTimeout(stepTimer.handle); break;
+      case 'immediate': clearImmediate(stepTimer.handle); break;
+      case 'none': break;
+    }
+    stepTimer = { tag: 'none' };
+  };
   let nextStepAtMs = 0;
   let terminalReceived = false;
   try {
@@ -78,7 +87,7 @@ webSockets.on("connection", (webSocket) => {
       const status = JSON.parse(line) as { type?: string; backend?: string };
       if (status.type === "ended" || status.type === "error") {
         terminalReceived = true;
-        if (stepTimer) clearTimeout(stepTimer);
+        cancelStep();
         clearTimeout(startupTimer);
         if (webSocket.readyState === WebSocket.OPEN) webSocket.send(line);
         return;
@@ -105,7 +114,7 @@ webSockets.on("connection", (webSocket) => {
     errorText += chunk;
   });
   bridge.on("exit", (code) => {
-    if (stepTimer) clearTimeout(stepTimer);
+    cancelStep();
     clearTimeout(startupTimer);
     if (!terminalReceived && webSocket.readyState === WebSocket.OPEN) {
       sendJson(webSocket, {
@@ -144,7 +153,7 @@ webSockets.on("connection", (webSocket) => {
 
   const sendStep = (): void => {
     if (bridge?.stdin.destroyed || bridge?.stdin.writableEnded) {
-      if (stepTimer) clearTimeout(stepTimer);
+      cancelStep();
       return;
     }
     const safeCommand =
@@ -155,9 +164,14 @@ webSockets.on("connection", (webSocket) => {
   };
   const scheduleStep = (): void => {
     if (terminalReceived) return;
-    if (stepTimer) clearTimeout(stepTimer);
+    cancelStep();
     nextStepAtMs += stepPeriodMs;
-    stepTimer = setTimeout(sendStep, Math.max(0, nextStepAtMs - performance.now()));
+    const delay = nextStepAtMs - performance.now();
+    // An overdue step must not pay the host's minimum timer quantum again.
+    // Yield through the I/O loop so new pilot input is still serviced.
+    stepTimer = delay > 0
+      ? { tag: 'timer', handle: setTimeout(sendStep, delay) }
+      : { tag: 'immediate', handle: setImmediate(sendStep) };
   };
   const startupTimer = setTimeout(() => {
     sendJson(webSocket, { type: "error", message: "actual UF2 did not arm in rp2040js within 15 seconds" });
@@ -165,7 +179,7 @@ webSockets.on("connection", (webSocket) => {
   }, 15_000);
 
   webSocket.on("close", () => {
-    if (stepTimer) clearTimeout(stepTimer);
+    cancelStep();
     clearTimeout(startupTimer);
     lines.close();
     if (bridge && bridge.exitCode === null) {

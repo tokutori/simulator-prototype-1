@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { stepMcu } from './mcu-step.js';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -227,15 +228,14 @@ async function main(): Promise<void> {
   const instructionLimit = 100_000_000;
   let lastFlashPc = mcu.core.PC;
   let invalidPc: number | undefined;
-  while ((!servoReady() || safetyFailsafe) && instructions < instructionLimit) {
+  let startupIterations = 0;
+  while ((!servoReady() || safetyFailsafe) && startupIterations++ < instructionLimit) {
     if (mcu.core.PC >= 0x1000_0000 && mcu.core.PC < 0x1020_0000) lastFlashPc = mcu.core.PC;
     else if (pwm.top === 19_999 && mcu.core.PC > 0x0000_4000) {
       invalidPc = mcu.core.PC;
       break;
     }
-    const cycles = mcu.core.executeInstruction();
-    simulator.clock.tick(cycles * cycleNanos);
-    instructions += 1;
+    instructions += stepMcu(simulator, cycleNanos);
   }
   if (!servoReady() || safetyFailsafe) {
     throw new Error(
@@ -273,13 +273,11 @@ async function main(): Promise<void> {
     const rudderCommandRad = rudder.commandRad;
     const intervalStart = observation.time_s;
     // Causal held-input coupling: firmware sees only interval-start sensors.
-    const stepInstructionStart = instructions;
-    while (simulator.clock.micros < nextFirmwareTickUs && instructions - stepInstructionStart < instructionLimit) {
-      const cycles = mcu.core.executeInstruction();
-      simulator.clock.tick(cycles * cycleNanos);
-      instructions += 1;
+    let stepIterations = 0;
+    while (simulator.clock.micros < nextFirmwareTickUs && stepIterations++ < instructionLimit) {
+      instructions += stepMcu(simulator, cycleNanos, nextFirmwareTickUs);
     }
-    if (instructions - stepInstructionStart >= instructionLimit) throw new Error('virtual MCU per-step instruction watchdog reached');
+    if (stepIterations >= instructionLimit) throw new Error('virtual MCU per-step execution watchdog reached');
     nextFirmwareTickUs += args.dtS * 1e6;
     bridge.stdin.write(`${JSON.stringify({ elevator_command_rad: elevatorCommandRad, rudder_command_rad: rudderCommandRad })}\n`);
     observation = await readObservation();

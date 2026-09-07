@@ -12,6 +12,7 @@ import { FirmwareTelemetry } from './firmware-telemetry.js';
 import { attachServoPwm } from './servo-pwm.js';
 import { advanceUntil } from './execution-budget.js';
 import { installWatchdogMonitor } from './watchdog-monitor.js';
+import { stepMcu } from './mcu-step.js';
 
 interface PilotCommand {
   pilot_elevator: number;
@@ -146,7 +147,8 @@ async function step(line: string): Promise<void> {
   // expose future plant observations to firmware executing this interval.
   const mcuStarted = performance.now();
   const instructionsBefore = instructions;
-  advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs, executeOne, 1_000_000);
+  advanceUntil(() => simulator.clock.micros >= nextFirmwareTickUs,
+    () => { instructions += stepMcu(simulator, cycleNanos, nextFirmwareTickUs); }, 1_000_000);
   const mcuProcessingMs = performance.now() - mcuStarted;
   nextFirmwareTickUs += 10_000;
   const plantStarted = performance.now();
@@ -217,9 +219,7 @@ function finish(type: 'ended' | 'error', message: string): void {
 }
 
 function executeOne(): void {
-  const cycles = mcu.core.executeInstruction();
-  simulator.clock.tick(cycles * cycleNanos);
-  instructions += 1;
+  instructions += stepMcu(simulator, cycleNanos);
 }
 
 function applyPilot(command: PilotCommand): void {

@@ -14,10 +14,27 @@ review, not merely passing each local test.
 | Initial airspeed versus groundspeed | Schema 0.11 discriminated velocity frame; training launch explicitly ground5m/s, downward3deg. Shared state constructor and wind/pose tests. |
 | Sideslip force transformation | Explicit force basis. Wind-axis data uses full alpha/beta transform. BR data retains its documented stability-plane lift/drag plus total body CY approximation; no invented lateral coefficients or double-counted drag. |
 | Servo timestep instability | Analytic held-input response across rate limit, lag and deadband; monotonic and partition-invariance tests. |
-| Lost validity / termination / performance evidence | Web evidence schema implementation and integrated browser validation in progress. |
-| Hung plant not detected by virtual-time watchdog | Plant response4s and server response5s wall-clock monitors; deterministic deadline test. Browser packet-age warning in progress. Real hung-process integration remains to be exercised. |
+| Lost validity / termination / performance evidence | Implemented schema3 record/outcome/incidents and CSV metadata. Earlier integrated browser active-snapshot/reload test passed; additional strict malformed-evidence checks undergoing final gate. |
+| Hung plant not detected by virtual-time watchdog | Plant response4s and server response5s wall-clock monitors; deterministic deadline test. Browser packet-age warning and incident retention implemented. Windows bridge termination owns its process subtree. Real hung-process integration remains to be exercised. |
 | Incomplete run provenance | UF2/model/plant plus adapter, installed rp2040js, dependency lock and Node/V8 fingerprints; scenario identity includes timestep and fault conditions. CSV includes both new hashes. |
-| UART callback bypasses TX configuration/time | Adapter correction in progress; negative configuration and actual-UF2 tests still required. |
+| UART callback bypasses TX configuration/time | Serial completion/FIFO/backpressure and enable/mux/framing/baud checks implemented. Negative configuration and actual-UF2 tests pass. Unsupported IrDA/TXIRQ/activeDMA and DPS modes explicitly rejected; physical waveform remains unvalidated. |
+
+## Additional findings from the next holistic review
+
+- Non-CG moment references could be accepted without a moment translation;
+  enforce the supported reference contract rather than silently reinterpret data.
+- Invalid states/extreme finite steps could panic inside aerodynamic lookup;
+  structured numerical errors and application timestep policy are being added.
+- Delayed initial sample loading could replace a user-selected replay;
+  request-generation handling and regression coverage are being added.
+- Incomplete saved firmware evidence could pass presence-only validation;
+  required fields must be verified explicitly and never replaced with fake zeroes.
+- Live WebSocket origin/session admission and Windows process-subtree ownership
+  have been tightened; deterministic access tests pass.
+- Vite updates now share each application's HTTP port, avoiding competing HMR
+  connections across development and E2E servers. Two browser tests passed after
+  this fix; a subsequent run overlapped UART hardening and must be repeated on
+  the stable integrated tree.
 
 ## Integrated physical-model smoke
 

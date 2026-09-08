@@ -1,6 +1,7 @@
 import {
   AmbientLight,
   BoxGeometry,
+  Box3,
   BufferGeometry,
   Color,
   DirectionalLight,
@@ -13,6 +14,7 @@ import {
   MeshStandardMaterial,
   PCFShadowMap,
   PerspectiveCamera,
+  Quaternion,
   Scene,
   Vector3,
   WebGLRenderer,
@@ -33,6 +35,7 @@ import {
 } from "./app-state.ts";
 import { createAircraft, setControlSurfaces } from "./aircraft.ts";
 import { ChaseCamera } from "./chase-camera.ts";
+import { launchPlatformOpacity } from "./chase-occlusion.ts";
 import { nedEulerToThreeQuaternion, nedPositionToThree } from "./coordinates.ts";
 import { createDistanceRings } from "./distance-rings.ts";
 import { classifyFlightPhase, formatFlightTime, type FlightPhase } from "./flight-phase.ts";
@@ -197,7 +200,7 @@ function animate(nowMs: number): void {
   if (frame) {
     displayFrame(frame, deltaS);
   }
-  environment.update(nowMs / 1000, aircraft.root.position);
+  environment.update(nowMs / 1000, aircraft.root.position, camera.position, aircraft.root.quaternion, cameraMode);
   renderer.render(scene, camera);
 }
 
@@ -284,7 +287,7 @@ function renderXrState(): void {
 }
 
 interface FlightEnvironment {
-  update(timeS: number, focus: Vector3): void;
+  update(timeS: number, focus: Vector3, eye: Vector3, attitude: Quaternion, mode: CameraMode): void;
 }
 
 function buildEnvironment(target: Scene): FlightEnvironment {
@@ -324,6 +327,12 @@ function buildEnvironment(target: Scene): FlightEnvironment {
   edge.position.set(0, 10.27, 0.12);
   platform.add(edge);
   target.add(platform);
+  const platformBounds = new Box3().setFromObject(platform);
+  const edgeMaterial = edge.material;
+  // Chase is an inspection view: a launch-platform silhouette must not hide the
+  // aircraft during its initial descent. Cockpit/VR never apply this fade.
+  concrete.transparent = true;
+  edgeMaterial.transparent = true;
 
   const buoyMaterial = new MeshStandardMaterial({ color: 0xf06e3e, roughness: 0.7 });
   for (let north = 50; north <= 900; north += 50) {
@@ -333,8 +342,14 @@ function buildEnvironment(target: Scene): FlightEnvironment {
   }
 
   return {
-    update(timeS: number, focus: Vector3): void {
+    update(timeS: number, focus: Vector3, eye: Vector3, attitude: Quaternion, mode: CameraMode): void {
       water.update(timeS);
+      const opacity = launchPlatformOpacity(mode, eye, focus, attitude, platformBounds);
+      for (const material of [concrete, edgeMaterial]) {
+        material.opacity = opacity;
+        material.depthWrite = opacity === 1;
+      }
+      deck.castShadow = opacity === 1;
       // The directional-light shadow camera is finite even though it models
       // sunlight. Tracking the aircraft prevents a hard cutoff after launch.
       sun.target.position.set(focus.x, 0, focus.z);

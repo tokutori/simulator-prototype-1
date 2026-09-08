@@ -1,5 +1,20 @@
 import { test, expect } from '@playwright/test';
 
+test('launch platform occlusion keeps the early-descent chase view readable', async ({ page }, testInfo) => {
+  await page.goto('/');
+  await page.locator('#csv-file').setInputFiles({ name: 'early-descent.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('time_s,north_m,altitude_m,pitch_deg,airspeed_mps\n0,9,7,-17,9\n10,9,7,-17,9\n') });
+  await expect(page.locator('#connection-status')).toHaveText('early-descent.csv');
+  await expect(page.locator('#altitude-value')).toHaveText('7.0');
+  await page.locator('#timeline').fill('0.2');
+  await page.locator('#play-pause').click();
+  await expect(page.locator('#flight-event')).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('early-descent-chase-clearance.png') });
+  await page.locator('#cockpit-camera').click();
+  await expect(page.locator('#cockpit-camera')).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: testInfo.outputPath('early-descent-cockpit.png') });
+});
+
 test('late startup sample cannot replace a user-selected replay', async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });

@@ -74,3 +74,62 @@ test("low render rate does not accumulate an artificial simulation-clock backlog
   }
   assert.ok(shown >= 0.99);
 });
+
+test("60 seconds of alternating delivery jitter has bounded lag at real-time and slow producer speeds", () => {
+  for (const slowdown of [1, 8]) {
+    const playback = new LivePlayback();
+    let nextArrival = 0;
+    let sampleIndex = 0;
+    let displayed = 0;
+    for (let wallMs = 0; wallMs <= 60_000; wallMs++) {
+      if (wallMs === nextArrival) {
+        playback.push(frame(sampleIndex / 100, sampleIndex / 10), wallMs);
+        sampleIndex++;
+        nextArrival += (sampleIndex % 2 === 1 ? 5 : 15) * slowdown;
+      }
+      const lastSimulationS = (sampleIndex - 1) / 100;
+      if (wallMs % 16 === 0) {
+        const next = playback.frame(wallMs)!.timeS;
+        assert.ok(next >= displayed, "presentation time must never run backward");
+        assert.ok(next <= lastSimulationS, "presentation must never invent a future aircraft state");
+        displayed = next;
+      }
+      if (wallMs > 1000) assert.ok(lastSimulationS - displayed < 0.06,
+        `accumulating lag at slowdown ${slowdown}, wall ${wallMs}: ${lastSimulationS - displayed}`);
+    }
+    assert.ok(Math.abs(displayed - 60 / slowdown) < 0.06);
+  }
+});
+
+test("window-estimator transient lag recovers after a slow producer becomes real-time", () => {
+  const playback = new LivePlayback();
+  let nextArrival = 0;
+  let sampleIndex = 0;
+  let displayed = 0;
+  let transientLag = 0;
+  for (let wallMs = 0; wallMs <= 6000; wallMs++) {
+    if (wallMs === nextArrival) {
+      playback.push(frame(sampleIndex / 100, sampleIndex / 10), wallMs);
+      sampleIndex++;
+      nextArrival += wallMs < 2000 ? 80 : 10;
+    }
+    if (wallMs % 16 === 0) {
+      const next = playback.frame(wallMs)!.timeS;
+      assert.ok(next >= displayed && next <= (sampleIndex - 1) / 100);
+      displayed = next;
+    }
+    if (wallMs === 3000) transientLag = (sampleIndex - 1) / 100 - displayed;
+  }
+  assert.ok(transientLag > 0.1, "fixture must exercise an estimator transient");
+  assert.ok((sampleIndex - 1) / 100 - displayed < 0.04, "lag must recover, not persist for the rest of the flight");
+});
+
+test("a new session resets the rate window and ordered-sample contract rejects stale frames", () => {
+  const previous = new LivePlayback();
+  previous.push(frame(100, 1000), 1000);
+  assert.throws(() => previous.push(frame(99, 990), 1001), /must be ordered/);
+  assert.throws(() => previous.push(frame(101, 1010), 999), /must be ordered/);
+  const restarted = new LivePlayback();
+  restarted.push(frame(0, 0), 2000);
+  assert.equal(restarted.frame(2000)!.timeS, 0);
+});

@@ -6,6 +6,7 @@ import type { FlightFrame } from "./types.ts";
  */
 export class LivePlayback {
   private samples: ReceivedFlightFrame[] = [];
+  private rateWindow: ReceivedFlightFrame[] = [];
   private cursorS: number | undefined;
   private previousWallMs: number | undefined;
   private rate = 1;
@@ -15,11 +16,22 @@ export class LivePlayback {
 
   push(frame: FlightFrame, receivedAtMs: number): void {
     const previous = this.samples.at(-1);
-    if (previous && frame.timeS > previous.frame.timeS && receivedAtMs > previous.receivedAtMs) {
-      const measured = Math.min(1, (frame.timeS - previous.frame.timeS) * 1000 / (receivedAtMs - previous.receivedAtMs));
-      this.rate = this.samples.length < 3 ? measured : this.rate * 0.8 + measured * 0.2;
+    if (previous && (frame.timeS <= previous.frame.timeS || receivedAtMs < previous.receivedAtMs)) {
+      throw new Error("Live presentation samples must be ordered");
     }
-    this.samples.push({ frame, receivedAtMs });
+    const sample = { frame, receivedAtMs };
+    this.samples.push(sample);
+    this.rateWindow.push(sample);
+    // Keep one bracketing sample before the rolling one-second window. Ratio of
+    // total elapsed times is unbiased by alternating short/long delivery gaps;
+    // averaging individually capped instantaneous ratios was not.
+    while (this.rateWindow.length > 2 && this.rateWindow[1]!.receivedAtMs <= receivedAtMs - 1000) {
+      this.rateWindow.shift();
+    }
+    const first = this.rateWindow[0]!;
+    const wallSpanMs = receivedAtMs - first.receivedAtMs;
+    // Do not interpret an initial packet burst/timestamp quantization as speed.
+    if (wallSpanMs >= 100) this.rate = (frame.timeS - first.frame.timeS) * 1000 / wallSpanMs;
     this.cursorS ??= frame.timeS;
   }
 
@@ -33,7 +45,14 @@ export class LivePlayback {
     if (!first || !last || this.cursorS === undefined) return undefined;
     // Prime a two-interval buffer before starting. Under-runs hold, never invent a future pose.
     if (this.ended || this.samples.length >= 3 || this.cursorS > first.frame.timeS) {
-      this.cursorS = Math.min(last.frame.timeS, this.cursorS + elapsed * this.rate);
+      const previous = this.samples.at(-2);
+      const samplePeriodS = previous ? last.frame.timeS - previous.frame.timeS : 0;
+      const desiredLagS = Math.max(samplePeriodS * 2, this.rate * 0.03);
+      // Gently recover backlog from a rate change/stall, rather than retaining a
+      // permanent old view while the MCU is current. Never move the cursor in
+      // push(), and cap recovery at twice measured producer speed.
+      const recovery = Math.min(this.rate, Math.max(0, last.frame.timeS - this.cursorS - desiredLagS) * 2);
+      this.cursorS = Math.min(last.frame.timeS, this.cursorS + elapsed * (this.rate + recovery));
     }
     const result = interpolateFrame(this.samples.map(sample => sample.frame), this.cursorS);
     while (this.samples.length > 3 && this.samples[1]!.frame.timeS < this.cursorS) this.samples.shift();

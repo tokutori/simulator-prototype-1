@@ -5,6 +5,28 @@ The earlier closure in `review-remediation.md` did not cover these subsequently
 identified defects. Completion requires an integrated gate and another full
 review, not merely passing each local test.
 
+## Current audit status (supersedes historical pending notes below)
+
+At `dee91da`, all five integrated browser tests pass, including actual-UF2 held
+input at 3 FPS; 59 browser-domain unit tests and build/typecheck pass. Thirty
+virtual-platform unit tests and its typecheck also pass. Real process freeze,
+normal terminal delivery, long recording capacity, and chase platform visual
+checks described below are complete within their stated software scope.
+
+The remaining investigated issue is an intermittent 15s startup timeout seen
+during SwiftShader browser testing. Twelve sequential no-render starts took
+0.48–0.65s, all releasing at MCU780780.536us. Three repeated browser
+restart/replay/analysis tests then passed (31.7–37.8s per whole test).
+This does **not** prove the earlier timeout's root cause. Stage/PID/process-CPU
+diagnostics now distinguish reached initialization stages; timeout reporting
+includes the captured diagnostic instead of losing it. Diagnostic timing starts
+after module evaluation, so loader/scheduler delay remains outside that clock.
+No timeout threshold or production control behavior was relaxed.
+
+Independent startup-path review found no deterministic race explaining the
+observations. Host contention is a hypothesis, not an established cause.
+The full audit remains open while that distinction is unresolved.
+
 | Finding | Current evidence / remaining work |
 | --- | --- |
 | MCU capacity near 0.25x | Production timer sleep and bounded peripheral-event execution, live CPU multiplier 1. 80-update smoke at 4173 reached minimum 0.96x and no non-realtime samples before the subsequent sensor changes; repeat integrated performance gate. |

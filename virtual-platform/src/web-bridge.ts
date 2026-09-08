@@ -25,6 +25,12 @@ interface PilotCommand {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const startupStartedMs = performance.now();
+const startupStage = (stage: string): void => {
+  const cpu = process.cpuUsage();
+  process.stderr.write(`startup: ${stage} at ${(performance.now() - startupStartedMs).toFixed(1)} ms after module load; pid=${process.pid}; process CPU=${((cpu.user + cpu.system) / 1000).toFixed(1)} ms\n`);
+};
+startupStage('hashing run identity');
 const executable = process.platform === 'win32' ? 'plant-bridge.exe' : 'plant-bridge';
 const bridgePath = resolve(root, 'target', 'debug', executable);
 const uf2Path = resolve(root, 'target', 'virtual-platform', 'fbw-rp2040.uf2');
@@ -67,6 +73,7 @@ const readPlant = async (): Promise<PlantObservation> => {
 };
 
 const simulator = new Simulator();
+startupStage('initializing MCU');
 const mcu = simulator.rp2040;
 installWatchdogMonitor(mcu);
 const recorder = new FirmwareTelemetry();
@@ -79,7 +86,9 @@ mcu.core.VTOR = vectorTable;
 mcu.core.SP = mcu.readUint32(vectorTable);
 mcu.core.PC = mcu.readUint32(vectorTable + 4) & 0xffff_fffe;
 
+startupStage('waiting for initial plant state');
 let observation = await readPlant();
+startupStage('configuring virtual devices');
 const bno = new Bno055Device();
 const angle = new As5600Device();
 const sdp = new Sdp810Device(() => simulator.clock.micros);
@@ -118,9 +127,11 @@ deadlinePin.addListener(state => { if (state === GPIOPinState.High) deadlineMiss
 
 const cycleNanos = 1e9 / 125_000_000;
 let instructions = 0;
+startupStage('executing production firmware startup');
 advanceUntil(() => !safetyFailsafe && recorder.state.tag === 'received'
   && servos.elevator.sample(simulator.clock.micros).kind === 'valid'
   && servos.rudder.sample(simulator.clock.micros).kind === 'valid', executeOne, 100_000_000);
+startupStage('firmware armed');
 
 const initialSimulationS = observation.time_s;
 const releaseMcuTimeUs = simulator.clock.micros;

@@ -194,7 +194,7 @@ webSockets.on("connection", (webSocket) => {
       : { tag: 'immediate', handle: setImmediate(sendStep) };
   };
   const startupTimer = setTimeout(() => {
-    finishSession('error', 'actual UF2 did not arm in rp2040js within 15 seconds');
+    finishSession('error', `actual UF2 did not arm in rp2040js within 15 seconds${errorText.trim() ? `; ${errorText.trim()}` : '; no bridge startup diagnostic received'}`);
   }, 15_000);
 
   // This timer lives outside the CPU-emulation/plant process: a blocked plant

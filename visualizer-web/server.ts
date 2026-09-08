@@ -65,6 +65,10 @@ httpServer.on("upgrade", (request, socket, head) => {
 });
 
 webSockets.on("connection", (webSocket) => {
+  const connectedAtMs = performance.now();
+  const lifecycleLog = (stage: string): void => {
+    process.stderr.write(`session pid=${bridge?.pid ?? 'pending'} ${stage} after ${(performance.now() - connectedAtMs).toFixed(1)} ms\n`);
+  };
   let command: PilotCommand = {
     pilot_elevator: 0,
     pilot_rudder: 0,
@@ -95,6 +99,7 @@ webSockets.on("connection", (webSocket) => {
   };
   try {
     bridge = spawn(process.execPath, [tsxCliPath, webBridgePath], { cwd: projectDirectory, windowsHide: true });
+    bridge.once('spawn', () => lifecycleLog('process spawned'));
   } catch (error) {
     sendJson(webSocket, { type: "error", message: String(error) });
     webSocket.close();
@@ -113,6 +118,7 @@ webSockets.on("connection", (webSocket) => {
       if (status.type === "ready") {
         if (status.backend !== "rp2040js-actual-uf2") throw new Error("unexpected MCU backend");
         clearTimeout(startupTimer);
+        lifecycleLog('ready');
         nextStepAtMs = performance.now();
         scheduleStep();
         return;
@@ -135,6 +141,7 @@ webSockets.on("connection", (webSocket) => {
   bridge.on('error', error => finishSession('error', `MCU bridge process error: ${String(error)}`));
   bridge.stdin.on('error', error => finishSession('error', `MCU bridge input error: ${String(error)}`));
   bridge.on("exit", (code) => {
+    lifecycleLog(`process exited code=${code}`);
     clearInterval(responseMonitor);
     cancelStep();
     clearTimeout(startupTimer);
@@ -207,6 +214,7 @@ webSockets.on("connection", (webSocket) => {
   function finishSession(type: 'ended' | 'error', message: string): void {
     if (terminalReceived) return;
     terminalReceived = true;
+    lifecycleLog(`terminal ${type}`);
     responseDeadline.complete();
     cancelStep();
     clearTimeout(startupTimer);
@@ -254,11 +262,17 @@ function terminateBridge(child: ChildProcessWithoutNullStreams): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const pid = child.pid;
   if (process.platform === 'win32' && typeof pid === 'number') {
+    const cleanupStartedMs = performance.now();
     const cleanup = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'],
       { windowsHide: true, stdio: 'ignore' });
     cleanup.on('error', error => {
       process.stderr.write(`failed to terminate simulator process tree: ${String(error)}\n`);
       child.kill();
+    });
+    cleanup.on('exit', (code, signal) => {
+      // A nonzero result may mean a naturally exiting child won the race. Keep
+      // the result visible instead of silently claiming subtree cleanup worked.
+      process.stderr.write(`cleanup pid=${pid} code=${code} signal=${signal ?? 'none'} elapsed=${(performance.now() - cleanupStartedMs).toFixed(1)} ms parentExited=${child.exitCode !== null || child.signalCode !== null}\n`);
     });
   } else {
     // Cooperative EOF lets the bridge close its plant, with an upper bound if

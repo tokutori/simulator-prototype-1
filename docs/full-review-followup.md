@@ -27,6 +27,18 @@ Independent startup-path review found no deterministic race explaining the
 observations. Host contention is a hypothesis, not an established cause.
 The full audit remains open while that distinction is unresolved.
 
+Server lifecycle logging now records spawn/ready/exit and taskkill completion.
+In a further isolated 12-start run, all 12 cleanup commands exited0 (about
+358–541ms); process exit events followed. The current real-process freeze gate
+also passed both cases and checked that owned MCU/plant PIDs were absent.
+This does not establish how a prior, uninstrumented timeout occurred.
+
+The next independent holistic review identified a separate reproducible live
+presentation defect: averaging clipped instantaneous arrival-rate ratios biases
+the display clock slow. Alternating5/15ms packet intervals for a100Hz producer
+left the displayed state about9.8s behind after60s. A windowed producer-clock
+estimate and bounded backlog recovery are being implemented and tested.
+
 A separate 12-start probe was then overlapped with FHD/4K SwiftShader rendering.
 All starts succeeded; during rendering, first telemetry took 0.69–2.12s,
 returning to about0.48s after the render probe ended. This establishes host-load

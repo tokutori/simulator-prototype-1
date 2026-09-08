@@ -28,5 +28,6 @@ IDはrepository内で一意とし、完了条件が満たされるまで`done`�
 
 `SIM-008`は`embedded-rust-playground`のUF2 load、`VTOR=0x10000100`、vector-tableのSP/PC、
 virtual I2C/PWM boundaryを参照した。BNO055/AS5600/SDP810/DPS310互換registerをactual
-firmwareが読み、50 Hz PWMをRust plantへ戻す20秒runを実行済み。10～500倍の加速率sweepから
-50倍をdefaultとしたが、非cycle-accurate timing、analog/electrical fault非対応を制約として引き継ぐ。
+firmwareが読み、50 Hz PWMをRust plantへ戻す。現行実装はCPU倍率1固定であり、
+旧試作の50倍defaultは廃止済み。実firmwareのタイマー待機とperipheral event dispatchで
+負荷を低減する。非cycle-accurate timing、analog/electrical fault非対応の制約は残る。

@@ -39,6 +39,8 @@ try {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/live`, { origin: `http://127.0.0.1:${port}` });
     let helper: ChildProcessWithoutNullStreams | undefined;
     let lastSampleAt = 0;
+    let serverCloseCode = 0;
+    socket.on('close', code => { serverCloseCode = code; });
     let receivedIdentity: unknown;
     let resolveFirst!: () => void;
     const first = new Promise<void>(ok => { resolveFirst = ok; });
@@ -68,6 +70,7 @@ try {
       // Do not close the socket yet: cleanup must follow the error, not be
       // accidentally supplied by this test's socket close/finally path.
       await delay(1200);
+      assert.equal(serverCloseCode, 1011, 'server must release errored WebSocket admission slots without client teardown');
       const ids = evidence.children.map(item => item.ProcessId);
       const query = `[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in @(${ids.join(',')}) } | Select-Object ProcessId,CreationDate) | ConvertTo-Json -Compress`;
       const remaining = execFileSync('powershell.exe', ['-NoProfile', '-Command', query], { windowsHide: true, encoding: 'utf8' }).trim();

@@ -105,18 +105,9 @@ webSockets.on("connection", (webSocket) => {
   lines.on("line", (line) => {
     if (terminalReceived) return;
     try {
-      const status = JSON.parse(line) as { type?: string; backend?: string };
+      const status = JSON.parse(line) as { type?: string; backend?: string; message?: string };
       if (status.type === "ended" || status.type === "error") {
-        terminalReceived = true;
-        responseDeadline.complete();
-        cancelStep();
-        clearTimeout(startupTimer);
-        clearInterval(responseMonitor);
-        if (webSocket.readyState === WebSocket.OPEN) webSocket.send(line);
-        // Finishing a flight also releases its MCU/plant allocation, even if
-        // the client keeps the analysis view open. Close follows queued data.
-        webSocket.close(1000, 'flight finished');
-        stopBridge();
+        finishSession(status.type, status.message ?? 'bridge supplied no terminal detail');
         return;
       }
       if (status.type === "ready") {
@@ -127,7 +118,7 @@ webSockets.on("connection", (webSocket) => {
         return;
       }
     } catch (error) {
-      sendJson(webSocket, { type: "error", message: `invalid MCU bridge output: ${String(error)}` });
+      finishSession('error', `invalid MCU bridge output: ${String(error)}`);
       return;
     }
     if (webSocket.readyState === WebSocket.OPEN) {
@@ -139,17 +130,16 @@ webSockets.on("connection", (webSocket) => {
   let errorText = "";
   bridge.stderr.setEncoding("utf8");
   bridge.stderr.on("data", (chunk: string) => {
-    errorText += chunk;
+    errorText = (errorText + chunk).slice(-8192);
   });
+  bridge.on('error', error => finishSession('error', `MCU bridge process error: ${String(error)}`));
+  bridge.stdin.on('error', error => finishSession('error', `MCU bridge input error: ${String(error)}`));
   bridge.on("exit", (code) => {
     clearInterval(responseMonitor);
     cancelStep();
     clearTimeout(startupTimer);
     if (!terminalReceived && webSocket.readyState === WebSocket.OPEN) {
-      sendJson(webSocket, {
-        type: "error",
-        message: errorText.trim() || `bridge exited with ${code} without a terminal reason`,
-      });
+      finishSession('error', errorText.trim() || `bridge exited with ${code} without a terminal reason`);
     }
   });
 
@@ -176,7 +166,7 @@ webSockets.on("connection", (webSocket) => {
         lastInputAt = Date.now();
       }
     } catch {
-      sendJson(webSocket, { type: "error", message: "invalid control JSON" });
+      finishSession('error', 'invalid control JSON');
     }
   });
 
@@ -204,20 +194,29 @@ webSockets.on("connection", (webSocket) => {
       : { tag: 'immediate', handle: setImmediate(sendStep) };
   };
   const startupTimer = setTimeout(() => {
-    sendJson(webSocket, { type: "error", message: "actual UF2 did not arm in rp2040js within 15 seconds" });
-    stopBridge();
+    finishSession('error', 'actual UF2 did not arm in rp2040js within 15 seconds');
   }, 15_000);
 
   // This timer lives outside the CPU-emulation/plant process: a blocked plant
   // read cannot freeze the watchdog that supervises it.
   const responseMonitor = setInterval(() => {
     if (terminalReceived || !responseDeadline.expired(performance.now())) return;
-    terminalReceived = true;
-    cancelStep();
-    clearInterval(responseMonitor);
-    sendJson(webSocket, { type: 'error', message: 'actual-UF2 bridge response timed out after 5 seconds (wall clock)' });
-    stopBridge();
+    finishSession('error', 'actual-UF2 bridge response timed out after 5 seconds (wall clock)');
   }, 250);
+
+  function finishSession(type: 'ended' | 'error', message: string): void {
+    if (terminalReceived) return;
+    terminalReceived = true;
+    responseDeadline.complete();
+    cancelStep();
+    clearTimeout(startupTimer);
+    clearInterval(responseMonitor);
+    sendJson(webSocket, { type, message });
+    // The server owns teardown, including clients which do not voluntarily
+    // disconnect after an error. Close follows previously queued telemetry.
+    webSocket.close(type === 'ended' ? 1000 : 1011, 'flight finished');
+    stopBridge();
+  }
 
   webSocket.on("close", () => {
     clearInterval(responseMonitor);

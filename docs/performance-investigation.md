@@ -6,6 +6,32 @@ Interactive flight executes the actual UF2 in rp2040js with clock multiplier 1.
 Rendering smoothness must not be confused with real-time controller capacity.
 No physical cycle-accuracy claim follows from this multiplier.
 
+## Browser-inclusive follow-up (2026-09-08)
+
+`node --import tsx scripts/check-render-performance.ts` in `visualizer-web`
+diagnoses the current `:4173` app at FHD and 4K. It reports MCU and plant work,
+simulation/wall ratio, animation cadence, and WebGL renderer identity. This is
+a diagnostic, not a portable machine-speed assertion. The actual open user
+browser was not inspected.
+
+Current headless Chromium uses **SwiftShader CPU rendering** on this host.
+Ten-second windows observed about 7 FPS at FHD and 2–3 FPS at 4K, while MCU
+progress remained roughly 0.9–1.0x. With no browser rendering, a full 23s
+surface-contact flight took 22.98s wall time. Hardware-accelerated browser
+performance cannot be inferred from either test.
+
+The low-FPS investigation exposed two additional application bugs: a 50ms
+presentation-delta cap made replay and chase smoothing run slowly; input was
+sent only from animation callbacks, exceeding the 250ms server input lease at
+3 FPS. Presentation now uses elapsed wall time, and input polling/sending has
+its own 40ms timer. This does not bypass the stale-input safety policy when the
+browser thread itself is blocked. DRAW FPS is distinct from MCU speed; low-FPS
+windows are archived as typed session incidents and warned about in analysis.
+
+High-DPI pixel load should be assessed separately from CSS UI sizing; see the
+[Three.js responsive rendering guide](https://threejs.org/manual/en/responsive.html).
+The current change does not silently reduce image quality or claim a GPU fix.
+
 ## Reproduction (2026-09-08)
 
 Run `node --import tsx src/performance-check.ts` from `virtual-platform` with no

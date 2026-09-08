@@ -1,5 +1,36 @@
 import { test, expect } from '@playwright/test';
 
+test('3 FPS rendering does not interrupt held input to the actual MCU', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.requestAnimationFrame = callback => window.setTimeout(() => callback(performance.now()), 333);
+    window.cancelAnimationFrame = id => window.clearTimeout(id);
+  });
+  const samples: { time_s: number; pilot_elevator: number; autonomy: number }[] = [];
+  page.on('websocket', socket => socket.on('framereceived', event => {
+    if (!String(event.payload).startsWith('{')) return;
+    const data = JSON.parse(String(event.payload));
+    if (data.backend === 'rp2040js-actual-uf2') samples.push(data);
+  }));
+  await page.goto('/');
+  await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
+  // Keep the aircraft on automatic control so the held full elevator input does
+  // not terminate the observation window by diving into the water.
+  await page.locator('#autonomy').fill('100');
+  await page.locator('#restart-live').click();
+  await expect(page.locator('#mcu-performance')).toContainText('CPU ×1', { timeout: 45_000 });
+  samples.length = 0;
+  await page.keyboard.down('s');
+  await expect.poll(() => samples.some(s => s.pilot_elevator === 1 && s.autonomy === 1)).toBe(true);
+  const first = samples.findIndex(s => s.pilot_elevator === 1 && s.autonomy === 1);
+  const start = samples[first]!.time_s;
+  await expect.poll(() => (samples.at(-1)?.time_s ?? start) - start, { timeout: 15_000 }).toBeGreaterThan(2);
+  const held = samples.slice(first).filter(s => s.time_s <= start + 2);
+  await page.keyboard.up('s');
+  expect(held.length).toBeGreaterThan(150);
+  expect(held.every(s => s.pilot_elevator === 1 && s.autonomy === 1)).toBe(true);
+  await expect(page.locator('#render-performance')).toContainText('LOW FPS');
+});
+
 test('launch platform occlusion keeps the early-descent chase view readable', async ({ page }, testInfo) => {
   await page.goto('/');
   await page.locator('#csv-file').setInputFiles({ name: 'early-descent.csv', mimeType: 'text/csv',

@@ -59,7 +59,8 @@ test("all session outcomes and stall incidents survive storage without inferring
   for (const outcome of [{ tag: "active" }, { tag: "ended", reason: "surface contact" },
     { tag: "failed", reason: "aircraft model envelope violation" }, { tag: "failed", reason: "MCU disconnected" },
     { tag: "aborted", reason: "User restarted the flight" }] as const) {
-    const incidents = [{ kind: "telemetry-stall" as const, wallTimeIso: "2026-09-08T00:00:00Z", sinceLastReceiptMs: 750 }];
+    const incidents = [{ kind: "telemetry-stall" as const, wallTimeIso: "2026-09-08T00:00:00Z", sinceLastReceiptMs: 750 },
+      { kind: 'low-render-fps' as const, wallTimeIso: '2026-09-08T00:00:01Z', fps: 3, windowMs: 1332 }];
     const restored = parseAnalysisDataset(JSON.stringify(prepareAnalysisDataset("test", frames, new Date(), outcome, incidents)));
     assert.deepEqual(restored.outcome, outcome);
     assert.deepEqual(restored.incidents, incidents);

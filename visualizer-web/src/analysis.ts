@@ -48,7 +48,7 @@ function render(value: FlightAnalysisDataset): void {
     outOfRange ? "AIRCRAFT MODEL OUT OF RANGE: trajectory is not validated within its aerodynamic envelope." : "",
     slow ? "NOT REAL-TIME: human interaction was performed with slowed simulation." : "",
     deadline ? "MCU DEADLINE MISSED." : "",
-    value.incidents.length ? `${value.incidents.length} telemetry stall(s) recorded; first at ${value.incidents[0]!.wallTimeIso}.` : "",
+    value.incidents.length ? `${value.incidents.filter(i => i.kind === 'telemetry-stall').length} telemetry stall(s), ${value.incidents.filter(i => i.kind === 'low-render-fps').length} low-FPS window(s); input/display latency may affect this experiment. First at ${value.incidents[0]!.wallTimeIso}.` : "",
     "Physical/cycle timing remains UNVALIDATED."].filter(Boolean);
   element("analysis-error").textContent = warnings.join(" ");
   element("analysis-error").hidden = false;

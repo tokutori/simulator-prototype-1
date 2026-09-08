@@ -92,3 +92,19 @@ The CSV retains exactly 12000 data rows and the fixture passes 1000m north.
 This is a high-altitude runtime-capacity fixture, not a Birdman range prediction.
 The gate now asserts those properties as well as duration and the old lifetime
 instruction-cap regression. Generated evidence is under `target/runtime-capacity`.
+
+### Terminal and browser-performance follow-up
+
+The real Windows process-freeze regression now passes for plant and MCU:
+wall deadlines fire, the server closes with 1011, and owned processes disappear
+before the client test performs cleanup. Natural surface contact also passes:
+2300 updates, final contact telemetry, terminal reason, server close 1000.
+Unified terminal teardown received a further independent read-only review.
+See `windows-process-freeze-regression.md` for the supported test boundary.
+
+The chase-platform obstruction is fixed and captured in browser screenshots.
+Further low-FPS review found presentation clock clipping and RAF-coupled pilot
+input. These are being checked with a new 3 FPS actual-UF2 regression; see
+`performance-investigation.md`. Keep the completion audit open until the full
+browser suite passes on the stable tree: an integrated run also observed an
+intermittent real startup timeout. Physical HIL/VR/model limits remain unchanged.

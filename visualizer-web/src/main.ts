@@ -47,6 +47,7 @@ import {
   type InputSettings,
 } from "./input.ts";
 import { LivePlayback } from "./live-playback.ts";
+import { updateRenderTiming, presentRenderTiming, presentationDeltaS, type RenderTiming } from './render-timing.ts';
 import { ReplaySelection } from "./replay-selection.ts";
 import { frameFromLive, interpolateFrame, parseFlightCsv, parseCsvOutcome, parseCsvIncidents, experimentColumns, experimentCsvValues } from "./replay.ts";
 import { createAnimatedWater, type AnimatedWater } from "./water.ts";
@@ -121,7 +122,7 @@ let playbackTimeS = 0;
 let replayPlaying = true;
 let playbackSpeed = 1;
 let previousAnimationMs = performance.now();
-let lastCommandSentMs = 0;
+let renderTiming: RenderTiming = { startMs: previousAnimationMs, frames: 0, status: { tag: 'measuring' } };
 let socket: WebSocket | undefined;
 const chaseCamera = new ChaseCamera();
 let trajectory: Line | undefined;
@@ -137,11 +138,15 @@ renderAppState();
 runEffect({ type: "connect-mcu", sessionId: appState.sessionId });
 void loadDefaultReplay(false);
 renderer.setAnimationLoop(animate);
+// Rendering may be much slower than the server's 250 ms input lease. Poll real
+// input separately; never resend cached held input from a worker after UI stalls.
+window.setInterval(pollPilotInput, 40);
 window.addEventListener("resize", resize);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   // A hidden tab is a presentation discontinuity, not a backlog to replay while flying.
   previousAnimationMs = performance.now();
+  renderTiming = updateRenderTiming(renderTiming, { type: 'reset', nowMs: previousAnimationMs });
   chaseCamera.reset();
   livePlayback = new LivePlayback();
   if (liveFrame) livePlayback.push(liveFrame, previousAnimationMs);
@@ -149,8 +154,21 @@ document.addEventListener("visibilitychange", () => {
 resize();
 
 function animate(nowMs: number): void {
-  const deltaS = Math.min(0.05, Math.max(0, (nowMs - previousAnimationMs) / 1000));
+  const deltaS = presentationDeltaS(previousAnimationMs, nowMs);
   previousAnimationMs = nowMs;
+  const previousRenderStatus = renderTiming.status;
+  const renderWindowMs = nowMs - renderTiming.startMs;
+  renderTiming = updateRenderTiming(renderTiming, { type: 'frame', nowMs });
+  if (renderTiming.status !== previousRenderStatus) {
+    const indicator = element('render-performance');
+    indicator.textContent = presentRenderTiming(renderTiming.status);
+    indicator.style.color = renderTiming.status.tag === 'measured' && renderTiming.status.slow ? '#ffbf69' : '';
+    if (liveOutcome.tag === 'active' && isInteractive(appState)
+      && renderTiming.status.tag === 'measured' && renderTiming.status.slow) {
+      liveIncidents.push({ kind: 'low-render-fps', wallTimeIso: new Date().toISOString(),
+        fps: renderTiming.status.fps, windowMs: renderWindowMs });
+    }
+  }
   if (nowMs - lastWatchdogCheckMs >= 250) {
     lastWatchdogCheckMs = nowMs;
     if ((appState.tag === "mcu-running" || appState.tag === "mcu-too-slow" || appState.tag === "mcu-stalled")
@@ -160,27 +178,6 @@ function animate(nowMs: number): void {
       dispatch({ type: "mcu-stale", sessionId: appState.sessionId, ageMs: nowMs - lastTelemetryReceiptMs });
     }
   }
-  const gamepad = navigator.getGamepads?.()[settings.gamepadIndex] ?? null;
-  element("gamepad-status").textContent = gamepad
-    ? `Gamepad ${gamepad.index}: ${gamepad.id}`
-    : "No gamepad detected";
-
-  if (isInteractive(appState)) {
-    if (document.hasFocus() && document.visibilityState === "visible") pilotInput.update(deltaS, gamepad);
-    else pilotInput.clear();
-    if (socket?.readyState === WebSocket.OPEN && nowMs - lastCommandSentMs >= 40) {
-      const command: PilotCommandMessage = {
-        pilot_elevator: pilotInput.elevator,
-        pilot_rudder: pilotInput.rudder,
-        autonomy: Number(element<HTMLInputElement>("autonomy").value) / 100,
-        elevator_input_kind: settings.elevator.source === "gamepad-axis" ? "analog" : "buttons",
-        rudder_input_kind: settings.rudder.source === "gamepad-axis" ? "analog" : "buttons",
-      };
-      socket.send(JSON.stringify(command));
-      lastCommandSentMs = nowMs;
-    }
-  }
-
   let frame: FlightFrame | undefined;
   if (!isInteractive(appState) && replayFrames.length > 0) {
     const last = replayFrames.at(-1);
@@ -202,6 +199,29 @@ function animate(nowMs: number): void {
   }
   environment.update(nowMs / 1000, aircraft.root.position, camera.position, aircraft.root.quaternion, cameraMode);
   renderer.render(scene, camera);
+}
+
+function pollPilotInput(): void {
+  const gamepad = navigator.getGamepads?.()[settings.gamepadIndex] ?? null;
+  element("gamepad-status").textContent = gamepad
+    ? `Gamepad ${gamepad.index}: ${gamepad.id}`
+    : "No gamepad detected";
+
+  if (isInteractive(appState)) {
+    if (document.hasFocus() && document.visibilityState === "visible") pilotInput.update(0.04, gamepad);
+    else pilotInput.clear();
+    if (socket?.readyState === WebSocket.OPEN) {
+      const command: PilotCommandMessage = {
+        pilot_elevator: pilotInput.elevator,
+        pilot_rudder: pilotInput.rudder,
+        autonomy: Number(element<HTMLInputElement>("autonomy").value) / 100,
+        elevator_input_kind: settings.elevator.source === "gamepad-axis" ? "analog" : "buttons",
+        rudder_input_kind: settings.rudder.source === "gamepad-axis" ? "analog" : "buttons",
+      };
+      socket.send(JSON.stringify(command));
+    }
+  }
+
 }
 
 function displayFrame(frame: FlightFrame, deltaS: number): void {

@@ -124,13 +124,20 @@ export interface InteractiveObservation {
 }
 
 export type SessionOutcome = { tag: "active" } | { tag: "ended" | "failed" | "aborted" | "unknown"; reason: string };
-export interface SessionIncident { kind: "telemetry-stall"; wallTimeIso: string; sinceLastReceiptMs: number }
+export type SessionIncident =
+  | { kind: "telemetry-stall"; wallTimeIso: string; sinceLastReceiptMs: number }
+  | { kind: "low-render-fps"; wallTimeIso: string; fps: number; windowMs: number };
 
 export function isSessionIncident(value: unknown): value is SessionIncident {
   if (!value || typeof value !== "object") return false;
   const incident = value as SessionIncident;
-  return incident.kind === "telemetry-stall" && typeof incident.wallTimeIso === "string"
-    && Number.isFinite(Date.parse(incident.wallTimeIso)) && Number.isFinite(incident.sinceLastReceiptMs) && incident.sinceLastReceiptMs >= 500;
+  if (typeof incident.wallTimeIso !== 'string' || !Number.isFinite(Date.parse(incident.wallTimeIso))) return false;
+  switch (incident.kind) {
+    case 'telemetry-stall': return Number.isFinite(incident.sinceLastReceiptMs) && incident.sinceLastReceiptMs >= 500;
+    case 'low-render-fps': return Number.isFinite(incident.fps) && incident.fps >= 0 && incident.fps < 30
+      && Number.isFinite(incident.windowMs) && incident.windowMs >= 1000;
+    default: return false;
+  }
 }
 
 export type ExperimentEvidence = { tag: "unknown" } | {

@@ -27,6 +27,13 @@ Independent startup-path review found no deterministic race explaining the
 observations. Host contention is a hypothesis, not an established cause.
 The full audit remains open while that distinction is unresolved.
 
+A separate 12-start probe was then overlapped with FHD/4K SwiftShader rendering.
+All starts succeeded; during rendering, first telemetry took 0.69–2.12s,
+returning to about0.48s after the render probe ended. This establishes host-load
+sensitivity, not the cause of the earlier15s outlier. Rendering ran about7.4FPS
+at FHD and2.7FPS at4K; 4K accumulated about1s simulation lag under this combined
+load. It is not acceptable to label that combined workload fully real-time.
+
 | Finding | Current evidence / remaining work |
 | --- | --- |
 | MCU capacity near 0.25x | Production timer sleep and bounded peripheral-event execution, live CPU multiplier 1. 80-update smoke at 4173 reached minimum 0.96x and no non-realtime samples before the subsequent sensor changes; repeat integrated performance gate. |

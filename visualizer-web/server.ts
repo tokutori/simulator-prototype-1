@@ -87,6 +87,12 @@ webSockets.on("connection", (webSocket) => {
   let nextStepAtMs = 0;
   let terminalReceived = false;
   const responseDeadline = new ResponseDeadline(5000);
+  let terminationRequested = false;
+  const stopBridge = (): void => {
+    if (terminationRequested || !bridge) return;
+    terminationRequested = true;
+    terminateBridge(bridge);
+  };
   try {
     bridge = spawn(process.execPath, [tsxCliPath, webBridgePath], { cwd: projectDirectory, windowsHide: true });
   } catch (error) {
@@ -105,7 +111,12 @@ webSockets.on("connection", (webSocket) => {
         responseDeadline.complete();
         cancelStep();
         clearTimeout(startupTimer);
+        clearInterval(responseMonitor);
         if (webSocket.readyState === WebSocket.OPEN) webSocket.send(line);
+        // Finishing a flight also releases its MCU/plant allocation, even if
+        // the client keeps the analysis view open. Close follows queued data.
+        webSocket.close(1000, 'flight finished');
+        stopBridge();
         return;
       }
       if (status.type === "ready") {
@@ -194,7 +205,7 @@ webSockets.on("connection", (webSocket) => {
   };
   const startupTimer = setTimeout(() => {
     sendJson(webSocket, { type: "error", message: "actual UF2 did not arm in rp2040js within 15 seconds" });
-    if (bridge) terminateBridge(bridge);
+    stopBridge();
   }, 15_000);
 
   // This timer lives outside the CPU-emulation/plant process: a blocked plant
@@ -205,7 +216,7 @@ webSockets.on("connection", (webSocket) => {
     cancelStep();
     clearInterval(responseMonitor);
     sendJson(webSocket, { type: 'error', message: 'actual-UF2 bridge response timed out after 5 seconds (wall clock)' });
-    if (bridge) terminateBridge(bridge);
+    stopBridge();
   }, 250);
 
   webSocket.on("close", () => {
@@ -214,7 +225,7 @@ webSockets.on("connection", (webSocket) => {
     clearTimeout(startupTimer);
     lines.close();
     if (bridge && bridge.exitCode === null) {
-      terminateBridge(bridge);
+      stopBridge();
     }
   });
 });

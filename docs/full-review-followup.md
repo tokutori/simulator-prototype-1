@@ -37,7 +37,17 @@ The next independent holistic review identified a separate reproducible live
 presentation defect: averaging clipped instantaneous arrival-rate ratios biases
 the display clock slow. Alternating5/15ms packet intervals for a100Hz producer
 left the displayed state about9.8s behind after60s. A windowed producer-clock
-estimate and bounded backlog recovery are being implemented and tested.
+estimate and bounded backlog recovery are implemented in `e301bcf`. The same
+60s jitter fixture now ends about8.55ms behind rather than9.8s. Tests enforce
+bounded lag for both1x and0.125x producers, monotonic time, no extrapolation,
+rate-change recovery and restart ordering. Integrated gate:62 web unit tests,
+five browser tests, typecheck and production build pass. Rust workspace tests,
+clippy with warnings denied and thumbv6m no_std core checks also pass.
+
+During this browser gate all logged startups completed in0.41–1.47s. Some
+normal-contact taskkill calls returned128 **after** the child exited normally;
+that observed race is distinct from a still-live child surviving cleanup.
+The real frozen-process tests above verify the latter path separately.
 
 A separate 12-start probe was then overlapped with FHD/4K SwiftShader rendering.
 All starts succeeded; during rendering, first telemetry took 0.69–2.12s,
